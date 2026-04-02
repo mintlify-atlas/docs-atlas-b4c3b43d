@@ -1,0 +1,202 @@
+---
+title: Bulk edit and overwrite processors
+description: Configuration reference for TfsWorkItemBulkEditProcessor and TfsWorkItemOverwriteProcessor, used to apply field changes to work items in place without performing a migration.
+---
+
+Two processors support modifying work items that already exist in a project rather than migrating them between projects:
+
+- **`TfsWorkItemBulkEditProcessor`** — selects work items from a project (typically the target) and applies field map changes in place. The most common use case is adapting work items after a process template change.
+- **`TfsWorkItemOverwriteProcessor`** — re-applies field mappings to work items that have already been migrated. Useful when field maps were updated and need to be reapplied without re-running the full migration.
+
+Neither processor migrates work items between projects. Both read from and write to the **same endpoint** (or use source/target for mapping lookups).
+
+---
+
+## TfsWorkItemBulkEditProcessor
+
+`TfsWorkItemBulkEditProcessor` loads work items from the target project and applies configured `FieldMaps` to them in place. The primary use case is a bulk update after a process template change — for example, changing field values, moving area paths, or updating tags on a large number of existing items.
+
+### Configuration options
+
+<ParamField body="ProcessorType" type="string" required>
+  Must be set to `"TfsWorkItemBulkEditProcessor"`.
+</ParamField>
+
+<ParamField body="Enabled" type="boolean" required>
+  Set to `true` to run this processor. Set to `false` to skip it.
+</ParamField>
+
+<ParamField body="SourceName" type="string" required>
+  The endpoint from which work items are loaded. For in-place edits this is typically
+  the same project as `TargetName`.
+</ParamField>
+
+<ParamField body="TargetName" type="string" required>
+  The endpoint where updated work items are written back. For in-place edits this is
+  the same project as `SourceName`.
+</ParamField>
+
+<ParamField body="WIQLQuery" type="string" required default="SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject AND [@ReflectedWorkItemIdField] = '' AND [System.WorkItemType] NOT IN ('Test Suite', 'Test Plan','Shared Steps','Shared Parameter','Feedback Request') ORDER BY [System.ChangedDate] desc">
+  A flat WIQL query that selects the work items to edit. The query runs against the
+  source endpoint. Use `@TeamProject` to reference the source project name. Only flat
+  queries (`FROM WorkItems`) are supported.
+</ParamField>
+
+<ParamField body="WorkItemIDs" type="integer[]" default="[]">
+  An explicit list of work item IDs to process. When specified, this list is used
+  instead of `WIQLQuery`.
+</ParamField>
+
+<ParamField body="WhatIf" type="boolean" default="false">
+  When `true`, the processor runs in dry-run mode: it evaluates which work items would
+  be changed and logs the intended changes, but does not write any updates. Use this
+  to validate field maps before committing changes.
+</ParamField>
+
+<ParamField body="FilterWorkItemsThatAlreadyExistInTarget" type="boolean" default="true">
+  Pre-loads all work items from the target and removes them from the processing list
+  before starting. For in-place edits, leave this as `false` unless you have a
+  specific reason to filter based on reflected IDs.
+</ParamField>
+
+<ParamField body="PauseAfterEachWorkItem" type="boolean" default="false">
+  When `true`, pauses and waits for a key press after processing each work item.
+  Intended for debugging only.
+</ParamField>
+
+<ParamField body="WorkItemCreateRetryLimit" type="integer" default="5">
+  **Beta.** Number of times to retry saving a work item when a transient failure
+  occurs. Set to `0` to disable retries.
+</ParamField>
+
+<ParamField body="Enrichers" type="object[]">
+  List of processor enricher configurations.
+</ParamField>
+
+<ParamField body="RefName" type="string">
+  Reserved for future use.
+</ParamField>
+
+### Complete configuration example
+
+```json
+{
+  "MigrationTools": {
+    "Version": "16.0",
+    "Processors": [
+      {
+        "ProcessorType": "TfsWorkItemBulkEditProcessor",
+        "Enabled": true,
+        "SourceName": "Target",
+        "TargetName": "Target",
+        "WIQLQuery": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject AND [System.WorkItemType] NOT IN ('Test Suite', 'Test Plan','Shared Steps','Shared Parameter','Feedback Request') ORDER BY [System.ChangedDate] desc",
+        "WorkItemIDs": null,
+        "WhatIf": false,
+        "FilterWorkItemsThatAlreadyExistInTarget": false,
+        "PauseAfterEachWorkItem": false,
+        "WorkItemCreateRetryLimit": 5
+      }
+    ]
+  }
+}
+```
+
+<Tip>
+  Before running `TfsWorkItemBulkEditProcessor` in a production environment, set
+  `WhatIf: true` and review the log output to confirm that only the intended items and
+  fields will be modified.
+</Tip>
+
+---
+
+## TfsWorkItemOverwriteProcessor
+
+`TfsWorkItemOverwriteProcessor` re-applies field mappings to work items that were already migrated by `TfsWorkItemMigrationProcessor`. It does not create new work items or replay revisions — it only reads the current state of matching work items from the source and applies the configured `FieldMaps` to the corresponding items in the target.
+
+Use this processor when:
+- You updated your `FieldMaps` configuration after the initial migration and need to reapply them
+- A field value was incorrectly mapped and needs to be corrected across many items
+
+<Warning>
+  **Preview processor.** This processor is in preview. It overwrites field values on
+  already-migrated work items. Changes are permanent and not automatically reversible.
+</Warning>
+
+### Configuration options
+
+<ParamField body="ProcessorType" type="string" required>
+  Must be set to `"TfsWorkItemOverwriteProcessor"`.
+</ParamField>
+
+<ParamField body="Enabled" type="boolean" required>
+  Set to `true` to run this processor. Set to `false` to skip it.
+</ParamField>
+
+<ParamField body="SourceName" type="string" required>
+  The source endpoint to read work items from for field mapping evaluation.
+</ParamField>
+
+<ParamField body="TargetName" type="string" required>
+  The target endpoint where field mappings are written back to existing work items.
+</ParamField>
+
+<ParamField body="WIQLQuery" type="string" required default="SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject AND [@ReflectedWorkItemIdField] = '' AND [System.WorkItemType] NOT IN ('Test Suite', 'Test Plan','Shared Steps','Shared Parameter','Feedback Request') ORDER BY [System.ChangedDate] desc">
+  A flat WIQL query that selects the source work items whose field mappings should be
+  reapplied to the target. Only work items that were previously migrated (have a
+  reflected work item ID in the target) are affected.
+</ParamField>
+
+<ParamField body="WorkItemIDs" type="integer[]" default="[]">
+  An explicit list of source work item IDs to process. When specified, this list is
+  used instead of `WIQLQuery`.
+</ParamField>
+
+<ParamField body="FilterWorkItemsThatAlreadyExistInTarget" type="boolean" default="true">
+  Pre-loads migrated work items from the target to build the source-to-target ID
+  mapping. Generally leave this as `true` for the overwrite processor to function
+  correctly.
+</ParamField>
+
+<ParamField body="PauseAfterEachWorkItem" type="boolean" default="false">
+  When `true`, pauses after each work item. For debugging only.
+</ParamField>
+
+<ParamField body="WorkItemCreateRetryLimit" type="integer" default="5">
+  **Beta.** Retry limit for transient failures when saving work items.
+</ParamField>
+
+<ParamField body="Enrichers" type="object[]">
+  List of processor enricher configurations.
+</ParamField>
+
+<ParamField body="RefName" type="string">
+  Reserved for future use.
+</ParamField>
+
+### Complete configuration example
+
+```json
+{
+  "MigrationTools": {
+    "Version": "16.0",
+    "Processors": [
+      {
+        "ProcessorType": "TfsWorkItemOverwriteProcessor",
+        "Enabled": true,
+        "SourceName": "Source",
+        "TargetName": "Target",
+        "WIQLQuery": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject AND [System.WorkItemType] NOT IN ('Test Suite', 'Test Plan','Shared Steps','Shared Parameter','Feedback Request') ORDER BY [System.ChangedDate] desc",
+        "WorkItemIDs": null,
+        "FilterWorkItemsThatAlreadyExistInTarget": true,
+        "PauseAfterEachWorkItem": false,
+        "WorkItemCreateRetryLimit": 5
+      }
+    ]
+  }
+}
+```
+
+## Related
+
+- [Field maps reference](/reference/field-maps) — configure which fields are changed and how
+- [TfsWorkItemMigrationProcessor](/reference/processors/work-item-migration) — the primary migration processor

@@ -1,0 +1,129 @@
+---
+title: TfsRevisionManagerTool
+description: Control how many revisions are migrated per work item and whether the full revision history is replayed or only the final state is written.
+---
+
+The `TfsRevisionManagerTool` gives you control over work item revision history during migration. You can choose to replay every historical revision (creating the full audit trail in the target) or write only the final state of each work item. You can also cap the number of revisions migrated per item to improve performance when dealing with work items that have hundreds or thousands of revisions.
+
+Work items with large revision counts are a common cause of slow migrations and memory pressure. Tuning this tool is often the most effective way to improve migration throughput.
+
+## Configuration
+
+Place the `TfsRevisionManagerTool` block inside `MigrationTools.CommonTools`:
+
+```json configuration.json
+{
+  "MigrationTools": {
+    "Version": "16.0",
+    "CommonTools": {
+      "TfsRevisionManagerTool": {
+        "Enabled": true,
+        "ReplayRevisions": true,
+        "MaxRevisions": 0
+      }
+    }
+  }
+}
+```
+
+## Options
+
+<ParamField body="Enabled" type="boolean" default="true">
+  Set to `true` to activate the tool. The default configuration has this enabled.
+</ParamField>
+
+<ParamField body="ReplayRevisions" type="boolean" default="true">
+  Controls whether the full revision history is replayed in the target.
+
+  - `true` — every revision is written to the target individually, preserving the complete change history and timestamps. This is the default and produces the most faithful migration.
+  - `false` — only the current (tip) state of each work item is written as a single revision. Set `BuildFieldTable` to `true` on the processor when using this option.
+
+  Setting `ReplayRevisions: false` is the single biggest lever for improving migration speed, but it means history will not appear in the target.
+</ParamField>
+
+<ParamField body="MaxRevisions" type="integer" default="0">
+  Maximum number of revisions to migrate per work item, using a **first + last N** strategy:
+
+  - The first revision (the creation event) is always included.
+  - The most recent `MaxRevisions - 1` revisions are included.
+  - Revisions in the middle are dropped.
+
+  A value of `0` (the default) means no limit — all revisions are migrated.
+
+  **Example:** With `MaxRevisions: 5` and a work item that has 20 revisions, you get revision 1 (creation) plus revisions 17, 18, 19, and 20 (the four most recent). Revisions 2–16 are skipped.
+</ParamField>
+
+## Scenarios
+
+<AccordionGroup>
+
+<Accordion title="Full history — maximum fidelity">
+  Migrate every revision of every work item. This is the default and appropriate for compliance-sensitive migrations where the complete audit trail must be preserved.
+
+  ```json json
+  {
+    "TfsRevisionManagerTool": {
+      "Enabled": true,
+      "ReplayRevisions": true,
+      "MaxRevisions": 0
+    }
+  }
+  ```
+
+  **Trade-off:** Slowest option, especially for work items with many revisions.
+</Accordion>
+
+<Accordion title="Capped history — balance speed and history">
+  Keep the creation event and the most recent revisions, dropping intermediate history. Useful when full history is not required but some recent context is still valuable.
+
+  ```json json
+  {
+    "TfsRevisionManagerTool": {
+      "Enabled": true,
+      "ReplayRevisions": true,
+      "MaxRevisions": 10
+    }
+  }
+  ```
+
+  **Trade-off:** Faster than full history. Intermediate revisions (state changes, comment history) between the first and the last `MaxRevisions - 1` are lost.
+</Accordion>
+
+<Accordion title="Final state only — maximum performance">
+  Write only the current state of each work item as a single revision. Use this when history is not needed and speed is the priority.
+
+  ```json json
+  {
+    "TfsRevisionManagerTool": {
+      "Enabled": true,
+      "ReplayRevisions": false,
+      "MaxRevisions": 1
+    }
+  }
+  ```
+
+  **Trade-off:** Fastest option. No change history will be visible in the target.
+</Accordion>
+
+</AccordionGroup>
+
+## Performance impact
+
+The number of revisions migrated is directly proportional to migration time and memory consumption. Each replayed revision is a separate API call to the target. A project with 10,000 work items averaging 15 revisions each generates 150,000 write operations when `ReplayRevisions: true` and `MaxRevisions: 0`.
+
+To estimate impact before a full run:
+
+1. Run a test migration against a representative sample of work items (use `WorkItemIDs` on the processor to pick a few with high revision counts).
+2. Record elapsed time.
+3. Adjust `MaxRevisions` or `ReplayRevisions` and re-run the test to compare.
+
+<Tip>
+  If you encounter `OutOfMemoryException` errors during migration, reducing `MaxRevisions` to a value between 50 and 100 is usually sufficient to resolve the issue without sacrificing meaningful history.
+</Tip>
+
+## Practical notes
+
+- `MaxRevisions: 0` is not "zero revisions" — it means unlimited. Set it to `1` if you want only the tip state.
+- The first-and-last selection strategy means the creation date and author are always preserved, even when `MaxRevisions` is set to a low number.
+- When `ReplayRevisions: false`, the work item appears in the target as if it was always in its current state. Consider whether your audit or compliance requirements allow this.
+- Combine with `AttachRevisionHistory: true` on the processor to attach a text summary of the full revision history as a work item attachment, giving you a human-readable record even when revisions are not replayed.

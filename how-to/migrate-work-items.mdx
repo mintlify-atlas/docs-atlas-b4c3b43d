@@ -1,0 +1,247 @@
+---
+title: Migrate work items
+description: A complete guide to migrating work items between Azure DevOps projects using TfsWorkItemMigrationProcessor, including configuration, WIQL queries, and tips for large migrations.
+---
+
+The `TfsWorkItemMigrationProcessor` is the primary processor for moving work items from one Azure DevOps project to another. It handles work item history (revisions), attachments, links, and metadata such as created date and created by.
+
+<Info>
+Before you begin, add the `ReflectedWorkItemId` custom field to **all work item types** in the **target** project only. This field tracks which source work item each target item came from. See the [ReflectedWorkItemId setup guide](/setup/reflected-workitem-id) for instructions.
+</Info>
+
+## What TfsWorkItemMigrationProcessor does
+
+- Transfers work items of any type between projects or organizations
+- Replicates the full revision history of each work item
+- Migrates attachments and internal/external links
+- Optionally preserves `Created Date` and `Created By` metadata
+- Skips work items that already exist in the target (when configured)
+
+## Step-by-step configuration
+
+<Steps>
+  <Step title="Initialize a configuration file">
+    Open a terminal in your working folder and run:
+
+    ```bash
+    devopsmigration init --options Basic
+    ```
+
+    This creates a `configuration.json` file you can customize.
+  </Step>
+
+  <Step title="Configure source and target endpoints">
+    Edit `configuration.json` to point to your source and target projects. Set `Collection` and `Project` for each, and provide a Personal Access Token (PAT) or use `Prompt` for interactive authentication.
+
+    ```json
+    "Endpoints": {
+      "Source": {
+        "EndpointType": "TfsTeamProjectEndpoint",
+        "Collection": "https://dev.azure.com/your-org/",
+        "Project": "SourceProject",
+        "Authentication": {
+          "AuthenticationMode": "AccessToken",
+          "AccessToken": "YOUR_SOURCE_PAT"
+        }
+      },
+      "Target": {
+        "EndpointType": "TfsTeamProjectEndpoint",
+        "Collection": "https://dev.azure.com/your-org/",
+        "Project": "TargetProject",
+        "Authentication": {
+          "AuthenticationMode": "AccessToken",
+          "AccessToken": "YOUR_TARGET_PAT"
+        },
+        "ReflectedWorkItemIdField": "Custom.ReflectedWorkItemId"
+      }
+    }
+    ```
+
+    <Warning>
+    The `ReflectedWorkItemIdField` must be set on the **Target** endpoint only. The field name must exactly match what you created in the target project (e.g., `Custom.ReflectedWorkItemId` or `nkdScrum.ReflectedWorkItemId`).
+    </Warning>
+  </Step>
+
+  <Step title="Configure the WIQL query">
+    The `WIQLQuery` controls which work items are migrated. The default query migrates all work items except test-specific types:
+
+    ```json
+    "WIQLQuery": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject AND [System.WorkItemType] NOT IN ('Test Suite', 'Test Plan','Shared Steps','Shared Parameter','Feedback Request') ORDER BY [System.ChangedDate] desc"
+    ```
+
+    Only flat `FROM WorkItems` queries are supported — tree and one-hop queries are not.
+  </Step>
+
+  <Step title="Enable and configure the processor">
+    Add `TfsWorkItemMigrationProcessor` to the `Processors` array with `"Enabled": true`:
+
+    ```json
+    "Processors": [
+      {
+        "ProcessorType": "TfsWorkItemMigrationProcessor",
+        "Enabled": true,
+        "UpdateCreatedDate": true,
+        "UpdateCreatedBy": true,
+        "FilterWorkItemsThatAlreadyExistInTarget": false,
+        "MaxGracefulFailures": 0,
+        "WIQLQuery": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject AND [System.WorkItemType] NOT IN ('Test Suite', 'Test Plan','Shared Steps','Shared Parameter','Feedback Request') ORDER BY [System.ChangedDate] desc"
+      }
+    ]
+    ```
+  </Step>
+
+  <Step title="Run the migration">
+    Execute the migration from your working folder:
+
+    ```bash
+    devopsmigration execute --config .\configuration.json
+    ```
+
+    The tool validates your configuration and data before starting. Watch the console output for validation errors or warnings about missing area/iteration paths.
+  </Step>
+</Steps>
+
+## Complete configuration example
+
+This is a working configuration for a basic work item migration between two Azure DevOps projects:
+
+```json
+{
+  "Serilog": {
+    "MinimumLevel": "Information"
+  },
+  "MigrationTools": {
+    "Version": "16.0",
+    "Endpoints": {
+      "Source": {
+        "EndpointType": "TfsTeamProjectEndpoint",
+        "Collection": "https://dev.azure.com/your-org/",
+        "Project": "SourceProject",
+        "Authentication": {
+          "AuthenticationMode": "AccessToken",
+          "AccessToken": "YOUR_SOURCE_PAT"
+        }
+      },
+      "Target": {
+        "EndpointType": "TfsTeamProjectEndpoint",
+        "Collection": "https://dev.azure.com/your-org/",
+        "Project": "TargetProject",
+        "Authentication": {
+          "AuthenticationMode": "AccessToken",
+          "AccessToken": "YOUR_TARGET_PAT"
+        },
+        "ReflectedWorkItemIdField": "Custom.ReflectedWorkItemId"
+      }
+    },
+    "CommonTools": {},
+    "Processors": [
+      {
+        "ProcessorType": "TfsWorkItemMigrationProcessor",
+        "Enabled": true,
+        "UpdateCreatedDate": true,
+        "UpdateCreatedBy": true,
+        "FilterWorkItemsThatAlreadyExistInTarget": false,
+        "PauseAfterEachWorkItem": false,
+        "AttachRevisionHistory": false,
+        "GenerateMigrationComment": true,
+        "MaxGracefulFailures": 0,
+        "WorkItemCreateRetryLimit": 5,
+        "FixHtmlAttachmentLinks": false,
+        "SkipRevisionWithInvalidIterationPath": false,
+        "SkipRevisionWithInvalidAreaPath": false,
+        "WIQLQuery": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject AND [System.WorkItemType] NOT IN ('Test Suite', 'Test Plan','Shared Steps','Shared Parameter','Feedback Request') ORDER BY [System.ChangedDate] desc"
+      }
+    ]
+  }
+}
+```
+
+## Key processor options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `UpdateCreatedDate` | bool | `true` | Sets the `Created Date` on migrated work items to match the source. Requires elevated permissions. |
+| `UpdateCreatedBy` | bool | `true` | Sets the `Created By` field to match the source author. Requires elevated permissions. |
+| `FilterWorkItemsThatAlreadyExistInTarget` | bool | `false` | Skips work items that already have a corresponding item in the target. Useful for re-running after failures. |
+| `WIQLQuery` | string | — | The WIQL query that selects work items to migrate. Must be a flat `FROM WorkItems` query. |
+| `MaxGracefulFailures` | int | `0` | Number of individual work item failures to tolerate before aborting the migration. Set higher for large migrations with known bad items. |
+| `WorkItemCreateRetryLimit` | int | `5` | How many times to retry creating a single work item before marking it as a graceful failure. |
+| `SkipRevisionWithInvalidIterationPath` | bool | `false` | Skip individual revisions that reference iteration paths missing from the target instead of failing. |
+| `SkipRevisionWithInvalidAreaPath` | bool | `false` | Skip individual revisions that reference area paths missing from the target instead of failing. |
+| `AttachRevisionHistory` | bool | `false` | Attaches a text file to each migrated item with a full revision history summary. |
+| `GenerateMigrationComment` | bool | `true` | Adds a comment to each migrated work item noting the source item ID and project. |
+| `PauseAfterEachWorkItem` | bool | `false` | Pauses and waits for a keypress after each work item. Useful for debugging. |
+
+## WIQL query examples
+
+<CodeGroup>
+
+```text All work items (default)
+SELECT [System.Id] FROM WorkItems
+WHERE [System.TeamProject] = @TeamProject
+  AND [System.WorkItemType] NOT IN ('Test Suite', 'Test Plan','Shared Steps','Shared Parameter','Feedback Request')
+ORDER BY [System.ChangedDate] desc
+```
+
+```text Scope to a specific area path
+SELECT [System.Id] FROM WorkItems
+WHERE [System.TeamProject] = @TeamProject
+  AND [System.AreaPath] UNDER 'SourceProject\Team 1'
+  AND [System.WorkItemType] NOT IN ('Test Suite', 'Test Plan','Shared Steps','Shared Parameter','Feedback Request')
+ORDER BY [System.ChangedDate] desc
+```
+
+```text Specific work item IDs (for testing)
+SELECT [System.Id] FROM WorkItems
+WHERE [System.Id] IN (123, 456, 789)
+  AND [System.TeamProject] = @TeamProject
+  AND [System.WorkItemType] NOT IN ('Test Suite', 'Test Plan','Shared Steps','Shared Parameter','Feedback Request')
+ORDER BY [System.ChangedDate] desc
+```
+
+```text Only active items
+SELECT [System.Id] FROM WorkItems
+WHERE [System.TeamProject] = @TeamProject
+  AND [System.State] NOT IN ('Closed', 'Resolved', 'Removed', 'Done')
+  AND [System.WorkItemType] NOT IN ('Test Suite', 'Test Plan','Shared Steps','Shared Parameter','Feedback Request')
+ORDER BY [System.ChangedDate] desc
+```
+
+</CodeGroup>
+
+<Tip>
+Use the [WIQL Editor extension](https://marketplace.visualstudio.com/items?itemName=ottostreifel.wiql-editor) in Azure DevOps to build and test your queries before putting them in the configuration file.
+</Tip>
+
+## Tips for large migrations
+
+<CardGroup cols={2}>
+  <Card title="Test with a small set first" icon="flask">
+    Use `WorkItemIDs` or a WIQL `IN` clause to migrate 5–10 representative work items before running the full migration. This catches field mapping issues and path problems early.
+  </Card>
+  <Card title="Set MaxGracefulFailures" icon="shield">
+    For migrations of thousands of items, set `MaxGracefulFailures` to a small number (e.g., `10`) so the migration continues past isolated bad items and reports failures at the end.
+  </Card>
+  <Card title="Handle area/iteration paths first" icon="map">
+    The migration will fail if area or iteration paths from source work items don't exist in the target. Configure [TfsNodeStructureTool](/how-to/area-iteration-maps) or create the paths manually before running.
+  </Card>
+  <Card title="Use FilterWorkItemsThatAlreadyExistInTarget for reruns" icon="rotate-ccw">
+    If a migration run fails partway through, set `FilterWorkItemsThatAlreadyExistInTarget` to `true` and rerun. The tool skips already-migrated items and continues from where it left off.
+  </Card>
+  <Card title="Increase log verbosity for debugging" icon="terminal">
+    Set `"MinimumLevel": "Debug"` in the `Serilog` section to see detailed output about which work items are being processed and why specific revisions may be skipped.
+  </Card>
+  <Card title="Migrate test items separately" icon="test-tube">
+    Exclude test work item types (`Test Suite`, `Test Plan`, `Shared Steps`, `Shared Parameter`) from the main migration. Migrating test plans requires a separate multi-step process — see [Migrate test plans](/how-to/migrate-test-plans).
+  </Card>
+</CardGroup>
+
+## Validation before migration starts
+
+The tool runs automatic validation before beginning migration. Common validation failures include:
+
+- **Missing work item types** — a type that exists in the source is absent from the target process template
+- **Missing ReflectedWorkItemId field** — the custom tracking field is not added to target work item types
+- **Missing custom fields** — fields that exist in source work item types don't exist in the target
+
+If validation fails, the migration stops immediately with detailed error messages. Resolve the reported issues before rerunning. See the [Validation documentation](/troubleshooting/validation) for a full list of validation checks and remediation steps.

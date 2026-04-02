@@ -1,0 +1,228 @@
+---
+title: TfsNodeStructureTool
+description: Create missing area and iteration path nodes in the target project and remap path structures during work item migration.
+---
+
+The `TfsNodeStructureTool` manages area and iteration path structures during migration. It creates nodes that exist in the source but are missing in the target, and applies regex-based mappings to rewrite path names so that the target project hierarchy can differ from the source.
+
+<Warning>
+  It is not possible to migrate a work item if its Area Path or Iteration Path does not exist in the target project. Work item creation will fail if the path is absent. Run this tool — or manually create the missing nodes — before migrating work items.
+</Warning>
+
+## Configuration
+
+Place the `TfsNodeStructureTool` block inside `MigrationTools.CommonTools`:
+
+```json configuration.json
+{
+  "MigrationTools": {
+    "Version": "16.0",
+    "CommonTools": {
+      "TfsNodeStructureTool": {
+        "Enabled": true,
+        "Areas": {
+          "Filters": [" *\\Team 1,*\\Team 1\\**"],
+          "Mappings": [
+            {
+              "Match": "^Skypoint Cloud([\\\\]?.*)$",
+              "Replacement": "MigrationTest5$1"
+            }
+          ]
+        },
+        "Iterations": {
+          "Filters": [],
+          "Mappings": [
+            {
+              "Match": "^Skypoint Cloud([\\\\]?.*)$",
+              "Replacement": "MigrationTest5$1"
+            }
+          ]
+        },
+        "ShouldCreateMissingRevisionPaths": true,
+        "ReplicateAllExistingNodes": true
+      }
+    }
+  }
+}
+```
+
+## Options
+
+<ParamField body="Enabled" type="boolean" default="true">
+  Set to `true` to activate the tool. When `false`, no node creation or path mapping is performed.
+</ParamField>
+
+<ParamField body="Areas" type="object">
+  Rules that govern how area paths are filtered and remapped.
+
+  <ParamField body="Areas.Filters" type="string[]" default="[]">
+    Glob patterns that select which area path nodes to migrate. An empty array migrates all nodes. Prefix a pattern with `!` to exclude it.
+
+    Examples:
+    - `["*\\Team 2"]` — only the node whose name ends with `Team 2`
+    - `["*\\Team 2", "*\\Team 2\\**"]` — `Team 2` and all its children
+    - `["*\\Team 2", "!*\\Team 2\\Sub-Area"]` — `Team 2` but not `Sub-Area` beneath it
+  </ParamField>
+
+  <ParamField body="Areas.Mappings" type="object[]">
+    Ordered list of regex rewrite rules applied to area path strings. The first rule whose `Match` pattern matches the path is used; subsequent rules are skipped for that path.
+
+    <ParamField body="Areas.Mappings[].Match" type="string">
+      A .NET regular expression pattern. The entire area path string is tested against this pattern.
+    </ParamField>
+
+    <ParamField body="Areas.Mappings[].Replacement" type="string">
+      The replacement string. Supports back-references (`$1`, `$2`, …) from capture groups in `Match`.
+    </ParamField>
+  </ParamField>
+</ParamField>
+
+<ParamField body="Iterations" type="object">
+  Rules that govern how iteration paths are filtered and remapped. Accepts the same `Filters` and `Mappings` structure as `Areas`.
+
+  <ParamField body="Iterations.Filters" type="string[]" default="[]">
+    Glob patterns selecting iteration path nodes to migrate. An empty array migrates all iteration nodes.
+  </ParamField>
+
+  <ParamField body="Iterations.Mappings" type="object[]">
+    Ordered list of regex rewrite rules applied to iteration path strings. Same structure as `Areas.Mappings`.
+  </ParamField>
+</ParamField>
+
+<ParamField body="ShouldCreateMissingRevisionPaths" type="boolean" default="true">
+  When `true`, the tool inspects all work item revisions in the source and creates any area or iteration path nodes that appear in historical revisions but are absent in the target. This prevents migration failures caused by paths that existed in the past but were later deleted.
+</ParamField>
+
+<ParamField body="ReplicateAllExistingNodes" type="boolean" default="true">
+  When `true`, all nodes currently present in the source project's area and iteration trees are created in the target, even if no work item currently references them. Set to `false` to create only nodes that are actively referenced.
+</ParamField>
+
+<ParamField body="MigrateRootNodes" type="boolean" default="false">
+  By default only child nodes are migrated. When `true`, the root node (default area or iteration) is also migrated. This is only meaningful when the root node is remapped via `Mappings` to a child position in the target; if the mapping still resolves to a root node, no action is taken.
+</ParamField>
+
+## Path mapping rules
+
+Mappings use .NET regular expressions. The `Match` property is tested against the full path string; if it matches, the path is rewritten using `Replacement`. Rules are evaluated in order and the first match wins.
+
+<Note>
+  Backslashes require double escaping: once for the regex engine (`\\` for a literal `\`) and once for JSON encoding. A literal backslash in a `Match` pattern therefore becomes `\\\\` in the JSON file. In `Replacement` strings, only the JSON escape is required: `\\`.
+</Note>
+
+### Simple renaming
+
+Rename the source project name in all paths:
+
+```json json
+{
+  "Iterations": {
+    "Mappings": [
+      {
+        "Match": "^WorkItemMovedFromProjectName\\\\Iteration 1",
+        "Replacement": "TargetProject\\Sprint 1"
+      }
+    ]
+  },
+  "Areas": {
+    "Mappings": [
+      {
+        "Match": "^WorkItemMovedFromProjectName\\\\Team 2",
+        "Replacement": "TargetProject\\ProductA\\Team 2"
+      }
+    ]
+  }
+}
+```
+
+### Routing sprints to different target paths
+
+Route sprints from different years to separate target locations:
+
+```json json
+{
+  "Iterations": {
+    "Mappings": [
+      {
+        "Match": "^OriginalProject\\\\Path1(?=\\\\Sprint 2022)(.*)$",
+        "Replacement": "TargetProject\\AnotherPath\\NewTeam$1"
+      },
+      {
+        "Match": "^OriginalProject\\\\Path1(?=\\\\Sprint 2020)(.*)$",
+        "Replacement": "TargetProject\\AnotherPath\\Archives\\Sprints 2020$1"
+      },
+      {
+        "Match": "^OriginalProject\\\\Path2(.*)$",
+        "Replacement": "TargetProject\\YetAnotherPath\\Path2$1"
+      }
+    ]
+  }
+}
+```
+
+### Archiving specific areas
+
+Move certain area paths into an archive location while routing the rest normally:
+
+```json json
+{
+  "Areas": {
+    "Mappings": [
+      {
+        "Match": "^OriginalProject\\\\(DescopeThis|DescopeThat)(.*)$",
+        "Replacement": "TargetProject\\Archive\\Descoped\\$1$2"
+      },
+      {
+        "Match": "^OriginalProject\\\\(?!DescopeThis|DescopeThat)(.*)$",
+        "Replacement": "TargetProject\\NewArea\\$1"
+      }
+    ]
+  }
+}
+```
+
+### Prefixing source project name (replacing PrefixProjectToNodes)
+
+Place all incoming nodes under a named bucket in the target to avoid merging with existing nodes:
+
+```json json
+{
+  "Iterations": {
+    "Mappings": [
+      {
+        "Match": "^SourceServer\\\\(.*)$",
+        "Replacement": "TargetServer\\SourceServer\\$1"
+      }
+    ]
+  },
+  "Areas": {
+    "Mappings": [
+      {
+        "Match": "^SourceServer\\\\(.*)$",
+        "Replacement": "TargetServer\\SourceServer\\$1"
+      }
+    ]
+  }
+}
+```
+
+## Filter pattern syntax
+
+`Filters` entries use glob syntax, not regular expressions.
+
+| Wildcard | Matches |
+|---|---|
+| `*` | Any characters, including none |
+| `?` | Any single character |
+| `[abc]` | One character from the set |
+| `[a-z]` | One character from the range |
+| `[!abc]` | One character not in the set |
+| `**` | Any number of path segments |
+
+Prefix a pattern with `!` to exclude nodes matching that pattern.
+
+## Practical notes
+
+- **Run before work item migration.** The tool must complete successfully before `TfsWorkItemMigrationProcessor` runs, otherwise work items referencing unmapped paths will fail.
+- **Enable debug logging.** Set `"LogLevel": "Debug"` in `Serilog` to trace how each path is evaluated against mappings. The log shows the pre- and post-mapping state for every node.
+- **Validate with regex101.** Use [regex101.com](https://regex101.com) to build and test `Match` patterns before adding them to your configuration. Select .NET flavour.
+- **Filters and mappings interact.** Mappings are applied only to nodes that pass through `Filters`. A node excluded by a filter is never remapped.

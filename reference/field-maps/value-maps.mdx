@@ -1,0 +1,411 @@
+---
+title: Value maps
+description: Reference for FieldToFieldMap, FieldValueMap, FieldToFieldMultiMap, FieldLiteralMap, FieldClearMap, FieldSkipMap, and FieldMergeMap field map types.
+---
+
+These field map types copy, translate, set, or combine field values during migration. Each map type is configured inside the `FieldMappingTool.FieldMaps` array.
+
+<AccordionGroup>
+
+  <Accordion title="FieldToFieldMap">
+
+    Copies the value from one source field to one target field. If the source value is null or empty, an optional `defaultValue` is applied instead.
+
+    This is the most commonly used field map for direct one-to-one field migrations.
+
+    ### Parameters
+
+    <ParamField body="FieldMapType" type="string" required>
+      Must be `"FieldToFieldMap"`.
+    </ParamField>
+
+    <ParamField body="ApplyTo" type="string[]" required>
+      List of work item type names this map applies to. Use `["*"]` to apply to all types.
+    </ParamField>
+
+    <ParamField body="sourceField" type="string">
+      Reference name of the field to read from the source work item (e.g., `"Microsoft.VSTS.Common.BacklogPriority"`).
+    </ParamField>
+
+    <ParamField body="targetField" type="string">
+      Reference name of the field to write on the target work item (e.g., `"Microsoft.VSTS.Common.StackRank"`).
+    </ParamField>
+
+    <ParamField body="defaultValue" type="string">
+      Value to assign when the source field is null or empty. Optional.
+    </ParamField>
+
+    <ParamField body="fieldMapMode" type="string" default="SourceToTarget">
+      Controls the direction of mapping. `"SourceToTarget"` reads from the source and writes to the target. `"TargetToTarget"` moves data between target fields.
+    </ParamField>
+
+    <ParamField body="Enabled" type="boolean">
+      Set to `false` to disable this map without removing it. Default is `true`.
+    </ParamField>
+
+    ### Example
+
+    ```json
+    {
+      "FieldMapType": "FieldToFieldMap",
+      "ApplyTo": ["SomeWorkItemType"],
+      "sourceField": "Microsoft.VSTS.Common.BacklogPriority",
+      "targetField": "Microsoft.VSTS.Common.StackRank",
+      "defaultValue": "42"
+    }
+    ```
+
+    <Note>
+      All source values are converted to strings before assignment. If the target field has a type constraint (e.g., integer), the target system's validation rules apply when the work item is saved.
+    </Note>
+
+  </Accordion>
+
+  <Accordion title="FieldValueMap">
+
+    Translates specific source field values to different target values using a `valueMapping` lookup table. If no match is found, the `defaultValue` is applied.
+
+    Use this map when the same concept is represented by different values in the source and target systems — for example, different state names across process templates.
+
+    ### Parameters
+
+    <ParamField body="FieldMapType" type="string" required>
+      Must be `"FieldValueMap"`.
+    </ParamField>
+
+    <ParamField body="ApplyTo" type="string[]" required>
+      List of work item type names this map applies to. Use `["*"]` to apply to all types.
+    </ParamField>
+
+    <ParamField body="sourceField" type="string">
+      Reference name of the field to read from.
+    </ParamField>
+
+    <ParamField body="targetField" type="string">
+      Reference name of the field to write to.
+    </ParamField>
+
+    <ParamField body="valueMapping" type="object">
+      Dictionary where each key is a source value and each value is the corresponding target value. Keys are case-sensitive. Use the key `"null"` to handle null source values.
+    </ParamField>
+
+    <ParamField body="defaultValue" type="string">
+      Value to use when the source value is not found in `valueMapping`.
+    </ParamField>
+
+    <ParamField body="Enabled" type="boolean">
+      Set to `false` to disable this map. Default is `true`.
+    </ParamField>
+
+    ### Example
+
+    ```json
+    {
+      "FieldMapType": "FieldValueMap",
+      "ApplyTo": ["SomeWorkItemType"],
+      "sourceField": "System.State",
+      "targetField": "System.State",
+      "valueMapping": {
+        "StateA": "StateB"
+      },
+      "defaultValue": "StateB"
+    }
+    ```
+
+    ### State migration example
+
+    ```json
+    {
+      "FieldMapType": "FieldValueMap",
+      "ApplyTo": ["User Story"],
+      "sourceField": "System.State",
+      "targetField": "System.State",
+      "valueMapping": {
+        "New": "To Do",
+        "Active": "Doing",
+        "Resolved": "Done",
+        "Closed": "Done"
+      },
+      "defaultValue": "To Do"
+    }
+    ```
+
+    <Warning>
+      Value matching is case-sensitive. Ensure your mapping keys exactly match the values as they appear in the source system.
+    </Warning>
+
+  </Accordion>
+
+  <Accordion title="FieldToFieldMultiMap">
+
+    Copies multiple field pairs in a single configuration block using a `SourceToTargetMappings` dictionary. Each key is a source field reference name; each value is the corresponding target field reference name.
+
+    Use this to avoid creating many individual `FieldToFieldMap` entries when you have batches of simple one-to-one mappings.
+
+    ### Parameters
+
+    <ParamField body="FieldMapType" type="string" required>
+      Must be `"FieldToFieldMultiMap"`.
+    </ParamField>
+
+    <ParamField body="ApplyTo" type="string[]" required>
+      List of work item type names this map applies to. Use `["*"]` to apply to all types.
+    </ParamField>
+
+    <ParamField body="SourceToTargetMappings" type="object">
+      Dictionary where each key is a source field reference name and each value is the target field reference name.
+    </ParamField>
+
+    <ParamField body="Enabled" type="boolean">
+      Set to `false` to disable this map. Default is `true`.
+    </ParamField>
+
+    ### Example
+
+    ```json
+    {
+      "FieldMapType": "FieldToFieldMultiMap",
+      "ApplyTo": ["SomeWorkItemType", "SomeOtherWorkItemType"],
+      "SourceToTargetMappings": {
+        "SourceField1": "TargetField1",
+        "SourceField2": "TargetField2"
+      }
+    }
+    ```
+
+    ### Process template migration example
+
+    ```json
+    {
+      "FieldMapType": "FieldToFieldMultiMap",
+      "ApplyTo": ["User Story"],
+      "SourceToTargetMappings": {
+        "Microsoft.VSTS.Scheduling.StoryPoints": "Microsoft.VSTS.Scheduling.Effort",
+        "Microsoft.VSTS.Common.BusinessValue": "Custom.BusinessValue",
+        "Custom.LegacyField1": "Custom.NewField1",
+        "Custom.LegacyField2": "Custom.NewField2"
+      }
+    }
+    ```
+
+    <Info>
+      Missing source fields are skipped without errors. Each pair is processed independently, so a failure on one pair does not prevent other pairs from being mapped.
+    </Info>
+
+  </Accordion>
+
+  <Accordion title="FieldLiteralMap">
+
+    Sets a fixed static value on a target field for every work item matched by `ApplyTo`. The same value is assigned regardless of the source field's content.
+
+    Use this to stamp all migrated items with a default state, tag, or custom field value.
+
+    ### Parameters
+
+    <ParamField body="FieldMapType" type="string" required>
+      Must be `"FieldLiteralMap"`.
+    </ParamField>
+
+    <ParamField body="ApplyTo" type="string[]" required>
+      List of work item type names this map applies to. Use `["*"]` to apply to all types.
+    </ParamField>
+
+    <ParamField body="targetField" type="string">
+      Reference name of the field to set.
+    </ParamField>
+
+    <ParamField body="value" type="string">
+      The literal value to assign to the target field.
+    </ParamField>
+
+    <ParamField body="Enabled" type="boolean">
+      Set to `false` to disable this map. Default is `true`.
+    </ParamField>
+
+    ### Example
+
+    ```json
+    {
+      "FieldMapType": "FieldLiteralMap",
+      "ApplyTo": ["SomeWorkItemType"],
+      "targetField": "Custom.SomeField",
+      "value": "New field value"
+    }
+    ```
+
+    ### Adding a migration tag to all items
+
+    ```json
+    {
+      "FieldMapType": "FieldLiteralMap",
+      "ApplyTo": ["*"],
+      "targetField": "System.Tags",
+      "value": "Migrated-2024"
+    }
+    ```
+
+    <Warning>
+      `FieldLiteralMap` always overwrites the existing target field value. If you need to preserve existing values under certain conditions, use a different field map type.
+    </Warning>
+
+  </Accordion>
+
+  <Accordion title="FieldClearMap">
+
+    Sets a target field to null. Before clearing, the map validates that the field exists, is editable, is not required, and (for choice fields) permits null values. Fields that fail validation are skipped silently.
+
+    Use this to remove sensitive data, reset legacy fields, or prevent validation errors caused by values that are not valid in the target system.
+
+    ### Parameters
+
+    <ParamField body="FieldMapType" type="string" required>
+      Must be `"FieldClearMap"`.
+    </ParamField>
+
+    <ParamField body="ApplyTo" type="string[]" required>
+      List of work item type names this map applies to. Use `["*"]` to apply to all types.
+    </ParamField>
+
+    <ParamField body="targetField" type="string">
+      Reference name of the field to clear (set to null).
+    </ParamField>
+
+    <ParamField body="Enabled" type="boolean">
+      Set to `false` to disable this map. Default is `true`.
+    </ParamField>
+
+    ### Example
+
+    ```json
+    {
+      "FieldMapType": "FieldClearMap",
+      "ApplyTo": ["SomeWorkItemType"],
+      "targetField": "Custom.FieldC"
+    }
+    ```
+
+    ### Removing a field across all types
+
+    ```json
+    {
+      "FieldMapType": "FieldClearMap",
+      "ApplyTo": ["*"],
+      "targetField": "Custom.InternalNotes"
+    }
+    ```
+
+    <Info>
+      The map performs these checks before clearing: field exists, not a restricted choice field that excludes null, field is editable in the current state, field is not required. If any check fails, the field is left unchanged and a debug message is logged.
+    </Info>
+
+  </Accordion>
+
+  <Accordion title="FieldSkipMap">
+
+    Restores a target field to its original value, undoing any modification that other field maps or the migration process may have applied. This effectively prevents the named field from being changed.
+
+    Use this to protect audit fields, system-generated values, or business fields that must not be overwritten.
+
+    ### Parameters
+
+    <ParamField body="FieldMapType" type="string" required>
+      Must be `"FieldSkipMap"`.
+    </ParamField>
+
+    <ParamField body="ApplyTo" type="string[]" required>
+      List of work item type names this map applies to. Use `["*"]` to apply to all types.
+    </ParamField>
+
+    <ParamField body="targetField" type="string">
+      Reference name of the field whose original value should be restored.
+    </ParamField>
+
+    <ParamField body="Enabled" type="boolean">
+      Set to `false` to disable this map. Default is `true`.
+    </ParamField>
+
+    ### Example
+
+    ```json
+    {
+      "FieldMapType": "FieldSkipMap",
+      "ApplyTo": ["*"],
+      "targetField": "System.CreatedDate"
+    }
+    ```
+
+    <Note>
+      `FieldSkipMap` restores the field to the value it held **before** field map processing began on the current work item revision. It does not freeze the field permanently across all revisions.
+    </Note>
+
+  </Accordion>
+
+  <Accordion title="FieldMergeMap">
+
+    Combines values from multiple source fields into a single target field using a .NET format string. Each source field maps to a numbered placeholder: `{0}` is the first field, `{1}` is the second, and so on. Null source values are treated as empty strings.
+
+    Use this to consolidate separate fields (such as first name + last name) or append additional context to description fields.
+
+    ### Parameters
+
+    <ParamField body="FieldMapType" type="string" required>
+      Must be `"FieldMergeMap"`.
+    </ParamField>
+
+    <ParamField body="ApplyTo" type="string[]" required>
+      List of work item type names this map applies to. Use `["*"]` to apply to all types.
+    </ParamField>
+
+    <ParamField body="sourceFields" type="string[]">
+      Ordered list of source field reference names. The position in the array determines the placeholder index in `formatExpression`.
+    </ParamField>
+
+    <ParamField body="targetField" type="string">
+      Reference name of the field to write the merged result to.
+    </ParamField>
+
+    <ParamField body="formatExpression" type="string">
+      .NET composite format string. Use `{0}`, `{1}`, `{n}` to reference source field values by position.
+    </ParamField>
+
+    <ParamField body="Enabled" type="boolean">
+      Set to `false` to disable this map. Default is `true`.
+    </ParamField>
+
+    ### Example
+
+    ```json
+    {
+      "FieldMapType": "FieldMergeMap",
+      "ApplyTo": ["SomeWorkItemType"],
+      "sourceFields": [
+        "Custom.FieldA",
+        "Custom.FieldB"
+      ],
+      "targetField": "Custom.FieldC",
+      "formatExpression": "{0} \n {1}"
+    }
+    ```
+
+    ### Appending acceptance criteria to description
+
+    ```json
+    {
+      "FieldMapType": "FieldMergeMap",
+      "ApplyTo": ["User Story"],
+      "sourceFields": [
+        "System.Description",
+        "Microsoft.VSTS.Common.AcceptanceCriteria"
+      ],
+      "targetField": "System.Description",
+      "formatExpression": "{0}\n\n<h3>Acceptance Criteria</h3>\n{1}"
+    }
+    ```
+
+    <Warning>
+      The number of `{n}` placeholders in `formatExpression` must not exceed the number of items in `sourceFields`. Extra placeholders will cause a runtime error.
+    </Warning>
+
+  </Accordion>
+
+</AccordionGroup>

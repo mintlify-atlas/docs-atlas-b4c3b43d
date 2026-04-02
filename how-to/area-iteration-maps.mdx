@@ -1,0 +1,293 @@
+---
+title: Remap area paths and iteration paths
+description: How to configure TfsNodeStructureTool to map area paths and iteration paths from source to target during migration, including filters, regex mappings, and common patterns.
+---
+
+Azure DevOps work items must have valid area and iteration paths in the target project. If you are migrating between projects with different names, different team structures, or different sprint naming conventions, you must tell the migration tools how to translate source paths to valid target paths.
+
+`TfsNodeStructureTool` handles this translation. It runs before work items are migrated and:
+
+1. Reads the area and iteration path structures from the source project
+2. Creates any missing nodes in the target project (when configured to do so)
+3. Applies your configured mappings to transform source paths into target paths
+
+<Warning>
+It is **not** possible to migrate a work item if its area or iteration path does not exist in the target project. If a path cannot be mapped to a valid target path, the migration will fail for that work item. There is no way around this requirement.
+</Warning>
+
+## How the tool is configured
+
+`TfsNodeStructureTool` lives in the `CommonTools` section of your configuration. It is automatically invoked during work item migration — you do not need to add it as a processor.
+
+```json
+"CommonTools": {
+  "TfsNodeStructureTool": {
+    "Enabled": true,
+    "Areas": {
+      "Filters": [],
+      "Mappings": []
+    },
+    "Iterations": {
+      "Filters": [],
+      "Mappings": []
+    },
+    "ShouldCreateMissingRevisionPaths": true,
+    "ReplicateAllExistingNodes": true
+  }
+}
+```
+
+### Key options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `Enabled` | bool | Set to `true` to activate the tool during migration. |
+| `Areas.Filters` | array | Glob patterns controlling which area paths are replicated in the target. Empty array means all paths are included. |
+| `Areas.Mappings` | array | Regex-based rules that transform source area paths to target area paths. |
+| `Iterations.Filters` | array | Glob patterns controlling which iteration paths are replicated in the target. |
+| `Iterations.Mappings` | array | Regex-based rules that transform source iteration paths to target iteration paths. |
+| `ShouldCreateMissingRevisionPaths` | bool | When `true`, the tool creates area/iteration nodes in the target for any paths referenced in historical work item revisions that don't yet exist. |
+| `ReplicateAllExistingNodes` | bool | When `true`, all nodes from the source project are created in the target, not just those referenced by work items being migrated. |
+
+---
+
+## Filters
+
+Filters use glob patterns to control which nodes are replicated in the target. If `Filters` is an empty array, all nodes are included. Prefix a pattern with `!` to exclude it.
+
+**Glob pattern reference:**
+
+| Pattern | Meaning |
+|---------|---------|
+| `*` | Matches any number of characters, excluding path separators |
+| `**` | Matches any number of path segments |
+| `?` | Matches any single character |
+| `!pattern` | Excludes paths matching the pattern |
+
+**Filter examples:**
+
+<CodeGroup>
+
+```json Migrate all paths
+"Areas": { "Filters": [] },
+"Iterations": { "Filters": [] }
+```
+
+```json Only Team 2 area and all sprints
+"Areas": { "Filters": ["*\\Team 2"] },
+"Iterations": { "Filters": ["*\\Sprint*"] }
+```
+
+```json Team 2 including sub-areas
+"Areas": { "Filters": ["*\\Team 2", "Team 2\\*"] },
+"Iterations": { "Filters": [] }
+```
+
+```json Team 2 excluding a specific sub-area
+"Areas": { "Filters": ["*\\Team 2", "!Team 2\\SubArea"] },
+"Iterations": { "Filters": [] }
+```
+
+</CodeGroup>
+
+<Note>
+When using area filters, update your `WIQLQuery` to match. For example, if you filter to `Team 2`, add `AND [System.AreaPath] UNDER 'SourceProject\\Team 2'` to your WIQL query so only work items in that area are migrated. Otherwise the migration will attempt to migrate work items whose area paths don't exist in the target.
+</Note>
+
+---
+
+## Mappings
+
+Mappings transform source paths to target paths. They are applied in order, and the first match wins. Each mapping has two properties:
+
+- `Match` — a .NET regular expression that is tested against the full source path
+- `Replacement` — the replacement string, which can include back-references (`$1`, `$2`, etc.)
+
+<Warning>
+Paths use backslashes as separators. In JSON strings, a single backslash must be written as `\\`. In a regex pattern, a literal backslash must be written as `\\` for the regex engine *and* then each of those backslashes must be escaped for JSON, resulting in `\\\\`. In the `Replacement` property, only one level of JSON escaping is needed, so a literal backslash is `\\`.
+</Warning>
+
+### Simple project rename
+
+If you are migrating from `OldProjectName` to `NewProjectName` and want to preserve the rest of the path structure:
+
+```json
+"Areas": {
+  "Filters": [],
+  "Mappings": [
+    {
+      "Match": "^OldProjectName([\\\\]?.*)$",
+      "Replacement": "NewProjectName$1"
+    }
+  ]
+},
+"Iterations": {
+  "Filters": [],
+  "Mappings": [
+    {
+      "Match": "^OldProjectName([\\\\]?.*)$",
+      "Replacement": "NewProjectName$1"
+    }
+  ]
+}
+```
+
+### Flatten all paths to the project root
+
+If you want to map all source paths to just the target project root (discarding the sub-path structure):
+
+```json
+"Iterations": {
+  "Filters": [],
+  "Mappings": [
+    {
+      "Match": "^OldProjectName([\\\\]?.*)$",
+      "Replacement": "NewProjectName"
+    }
+  ]
+},
+"Areas": {
+  "Filters": [],
+  "Mappings": [
+    {
+      "Match": "^OldProjectName([\\\\]?.*)$",
+      "Replacement": "NewProjectName"
+    }
+  ]
+}
+```
+
+### Map specific iteration paths by date
+
+Map sprints from different years to different target locations:
+
+```json
+"Iterations": {
+  "Filters": [],
+  "Mappings": [
+    {
+      "Match": "^OriginalProject\\\\Path1(?=\\\\Sprint 2022)(.*)$",
+      "Replacement": "TargetProject\\AnotherPath\\NewTeam$1"
+    },
+    {
+      "Match": "^OriginalProject\\\\Path1(?=\\\\Sprint 2020)(.*)$",
+      "Replacement": "TargetProject\\AnotherPath\\Archives\\Sprints 2020$1"
+    },
+    {
+      "Match": "^OriginalProject\\\\Path2(.*)$",
+      "Replacement": "TargetProject\\YetAnotherPath\\Path2$1"
+    }
+  ]
+}
+```
+
+### Archive specific area paths, route others to a new location
+
+```json
+"Areas": {
+  "Filters": [],
+  "Mappings": [
+    {
+      "Match": "^OriginalProject\\\\(DescopeThis|DescopeThat)(.*)$",
+      "Replacement": "TargetProject\\Archive\\Descoped\\$1$2"
+    },
+    {
+      "Match": "^OriginalProject\\\\(?!DescopeThis|DescopeThat)(.*)$",
+      "Replacement": "TargetProject\\NewArea\\$1"
+    }
+  ]
+}
+```
+
+`OriginalProject\DescopeThis\Area` becomes `TargetProject\Archive\Descoped\DescopeThis\Area`.  
+`OriginalProject\ValidArea\Sub` becomes `TargetProject\NewArea\ValidArea\Sub`.
+
+### Replicate the PrefixProjectToNodes pattern
+
+The old `PrefixProjectToNodes` option prepended the source project name to target paths. Reproduce this with:
+
+```json
+"Iterations": {
+  "Mappings": [
+    {
+      "Match": "^SourceServer\\\\(.*)$",
+      "Replacement": "TargetServer\\SourceServer\\$1"
+    }
+  ]
+},
+"Areas": {
+  "Mappings": [
+    {
+      "Match": "^SourceServer\\\\(.*)$",
+      "Replacement": "TargetServer\\SourceServer\\$1"
+    }
+  ]
+}
+```
+
+---
+
+## Complete configuration example
+
+This example is taken from `configuration-default.json` and shows a real mapping from the source project `Skypoint Cloud` to the target project `MigrationTest5`:
+
+```json
+{
+  "MigrationTools": {
+    "Version": "16.0",
+    "CommonTools": {
+      "TfsNodeStructureTool": {
+        "Enabled": true,
+        "Areas": {
+          "Filters": [" *\\Team 1,*\\Team 1\\**"],
+          "Mappings": [
+            {
+              "Match": "^Skypoint Cloud([\\\\]?.*)$",
+              "Replacement": "MigrationTest5$1"
+            },
+            {
+              "Match": "^7473924d-c47f-4089-8f5c-077c728b576e([\\\\]?.*)$",
+              "Replacement": "MigrationTest5$1"
+            }
+          ]
+        },
+        "Iterations": {
+          "Filters": [],
+          "Mappings": [
+            {
+              "Match": "^Skypoint Cloud([\\\\]?.*)$",
+              "Replacement": "MigrationTest5$1"
+            },
+            {
+              "Match": "^7473924d-c47f-4089-8f5c-077c728b576e([\\\\]?.*)$",
+              "Replacement": "MigrationTest5$1"
+            }
+          ]
+        },
+        "ShouldCreateMissingRevisionPaths": true,
+        "ReplicateAllExistingNodes": true
+      }
+    }
+  }
+}
+```
+
+Multiple `Mappings` entries are checked in order. In this example, the source project may appear under either its display name or its GUID, and both are mapped to the same target project name.
+
+---
+
+## Debugging mapping rules
+
+Before your migration starts, the tool validates that all area and iteration paths referenced in source work item revisions exist in the target (after mapping). Any that do not exist are listed in the logs.
+
+To see detailed output about how each path is being processed:
+
+```json
+"Serilog": {
+  "MinimumLevel": "Debug"
+}
+```
+
+<Tip>
+Use [regex101.com](https://regex101.com/) with the `.NET (C#)` flavor to test your regular expressions before adding them to the configuration. Remember that what you build in the tester needs its backslashes doubled again when placed inside a JSON string.
+</Tip>

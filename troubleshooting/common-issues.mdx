@@ -1,0 +1,322 @@
+---
+title: Common issues
+description: Solutions for the most frequently encountered errors and problems when running the Azure DevOps Migration Tools.
+---
+
+This page covers the issues most commonly reported by users. Each section describes the symptom, explains the cause, and provides a concrete solution.
+
+<AccordionGroup>
+  <Accordion title="PAT token is rejected or permissions errors during migration">
+    **Symptom**
+
+    The migration fails at startup or during work item writes with authentication errors, or the tool cannot set fields like `ChangedBy` or `CreatedBy` to their original values.
+
+    **Cause**
+
+    The Azure DevOps Migration Tools use the [TFS Client Object Model](https://learn.microsoft.com/en-us/azure/devops/integrate/concepts/dotnet-client-libraries?view=azure-devops), which only works with **full-access PATs**. Scoped PATs (with specific permissions such as Work Items Read/Write) are **not supported** and will fail in ways that are not always immediately obvious.
+
+    Additionally, writing historical data (setting `ChangedBy` to the original author rather than the migration account) requires the **"Make requests on behalf of others"** permission, which is not granted by default.
+
+    **Solution**
+
+    **PAT requirements:**
+
+    - Create a PAT with **Full access** for both your source and target connections.
+    - Even though the tool does not write to the source, the source PAT must also be full access.
+
+    **Permissions requirements for the target:**
+
+    - Membership in **Project Collection Administrators** (overrides deny rules and allows bypassing work item rules)
+    - Membership in **Project Collection Service Accounts** (grants "Make requests on behalf of others")
+
+    For older on-premises TFS, grant the migration user the service accounts group permission with:
+
+    ```cmd
+    tfssecurity /g+ "Project Collection Service Accounts" n:domain\username ALLOW /server:http://myserver:8080/tfs
+    ```
+
+    <Note>
+      This `tfssecurity` step is not required for Azure DevOps Services targets, as the permission is managed differently in the hosted service.
+    </Note>
+
+    See the [Permissions](/setup/permissions) page for the full list of required permissions.
+  </Accordion>
+
+  <Accordion title="Work items are skipped because they already exist in the target">
+    **Symptom**
+
+    The migration runs but many or all work items are logged as skipped with a message indicating they already exist in the target system. This commonly happens after a partial migration or when re-running a migration.
+
+    **Cause**
+
+    `TfsWorkItemMigrationProcessor` checks the `ReflectedWorkItemId` field on target work items to determine whether a source work item has already been migrated. If the field is populated, the item is skipped. The `FilterWorkItemsThatAlreadyExistInTarget` option controls this behaviour (it defaults to `true`).
+
+    **Solution**
+
+    This behaviour is intentional and allows you to safely resume a migration that was interrupted. If you want to re-migrate work items that have already been migrated (for example, after fixing a configuration problem), you have two options:
+
+    **Option 1 — Clear the `ReflectedWorkItemId` field on target items**
+
+    Use a bulk edit in Azure DevOps or a separate script to clear the `ReflectedWorkItemId` field value on the target work items you want to re-migrate.
+
+    **Option 2 — Disable the filter temporarily**
+
+    Set `FilterWorkItemsThatAlreadyExistInTarget` to `false` in your processor configuration. This will cause the tool to migrate all items matching the query regardless of whether they exist in the target, potentially creating duplicates.
+
+    ```json
+    {
+      "MigrationTools": {
+        "Processors": [
+          {
+            "ProcessorType": "TfsWorkItemMigrationProcessor",
+            "Enabled": true,
+            "FilterWorkItemsThatAlreadyExistInTarget": false,
+            "WIQLQuery": "SELECT [System.Id] FROM WorkItems WHERE ..."
+          }
+        ]
+      }
+    }
+    ```
+
+    <Warning>
+      Setting `FilterWorkItemsThatAlreadyExistInTarget` to `false` can create duplicate work items in the target. Only use this when you know you need to re-migrate items and have a plan to handle duplicates.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="Revisions are skipped due to invalid iteration or area paths">
+    **Symptom**
+
+    Individual work item revisions are skipped during migration with log messages indicating the iteration or area path from that revision does not exist in the target project.
+
+    **Cause**
+
+    When a work item is migrated with its full revision history, each revision must have valid area and iteration paths in the target. Historical revisions often reference paths that have since been renamed, moved, or deleted in the source — and these do not automatically exist in the target.
+
+    **Cause of the skip:**
+    The tool cannot write a revision that references a path that does not exist in the target's node structure.
+
+    **Solution**
+
+    **Option 1 — Migrate node structure first (recommended)**
+
+    Ensure `TfsNodeStructureTool` is enabled and configured before migrating work items. This tool copies the area and iteration node trees from source to target, including historical nodes.
+
+    ```json
+    {
+      "MigrationTools": {
+        "CommonTools": {
+          "TfsNodeStructureTool": {
+            "Enabled": true,
+            "NodeBasePaths": [],
+            "ShouldCreateMissingRevisionRootNodes": true
+          }
+        }
+      }
+    }
+    ```
+
+    Setting `ShouldCreateMissingRevisionRootNodes` to `true` causes the tool to create any missing root nodes encountered during revision processing.
+
+    **Option 2 — Map paths to target equivalents**
+
+    If the source and target projects have different area or iteration structures, configure `AreaMaps` and `IterationMaps` in `TfsNodeStructureTool` to translate paths during migration. See the [Area and iteration maps how-to guide](/how-to/area-iteration-maps).
+  </Accordion>
+
+  <Accordion title="Migration times out or runs out of memory on large datasets">
+    **Symptom**
+
+    The migration process hangs indefinitely, terminates with an out-of-memory error, or becomes very slow when migrating large numbers of work items (tens of thousands or more) or work items with many revisions.
+
+    **Cause**
+
+    Migrating large datasets with full revision history is memory-intensive. The tool loads revision data into memory before writing it to the target. Very large attachments, work items with hundreds of revisions, or very high total work item counts can exhaust available memory.
+
+    **Solutions**
+
+    **Break the migration into smaller batches**
+
+    Use the `WIQLQuery` to scope each run to a subset of work items. For example, migrate by area path, iteration, or work item type in separate runs:
+
+    ```text
+    SELECT [System.Id] FROM WorkItems
+    WHERE [System.TeamProject] = @TeamProject
+      AND [System.WorkItemType] = 'Bug'
+      AND [System.AreaPath] UNDER 'MyProject\TeamA'
+    ORDER BY [System.ChangedDate] desc
+    ```
+
+    Because `FilterWorkItemsThatAlreadyExistInTarget` defaults to `true`, you can safely re-run with overlapping queries — items already migrated will be skipped.
+
+    **Limit revision history**
+
+    If you do not need the full revision history, configure `TfsRevisionManagerTool` to limit the number of revisions migrated per work item:
+
+    ```json
+    {
+      "MigrationTools": {
+        "CommonTools": {
+          "TfsRevisionManagerTool": {
+            "Enabled": true,
+            "MaxRevisions": 10,
+            "ReplayRevisions": true
+          }
+        }
+      }
+    }
+    ```
+
+    **Run on a machine with more memory**
+
+    The tool is a native Windows application. Running it on a machine with 16 GB or more of RAM, and physically close (low latency) to both source and target, reduces the chance of timeouts and significantly improves throughput.
+  </Accordion>
+
+  <Accordion title="Test plan migration fails or produces incorrect results">
+    **Symptom**
+
+    Test plan or test suite migration fails, test cases are not linked correctly, or the rebuild step produces an error about missing linked work items.
+
+    **Cause**
+
+    Migrating test plans and suites is a multi-step process that must be performed in a specific order. If you run the `TestPlansAndSuitesMigrationProcessor` before migrating the underlying test cases, shared steps, and shared parameters, it will not be able to find the work items it needs to link to.
+
+    The required migration order is:
+
+    1. Migrate all standard work items (excluding test items)
+    2. Migrate `Test Cases`, `Shared Steps`, and `Shared Parameters`
+    3. Migrate `Test Variables` and `Test Configurations`
+    4. Rebuild `Test Plans` and `Test Suites`
+
+    **Additional complication:** `Shared Steps` cannot have a custom field added to them, so the standard `ReflectedWorkItemId` field cannot be used as the tracking field for these items. The `Microsoft.VSTS.Build.IntegrationBuild` field is used as a workaround.
+
+    **Solution**
+
+    Follow the four-phase approach described in the [Migrating Plans and Suites guide](/how-to/migrate-test-plans). Key points:
+
+    - Phase 1: migrate standard work items and use a field map to copy `ReflectedWorkItemId` into `Microsoft.VSTS.Build.IntegrationBuild` on the target.
+    - Phase 2: migrate test items using `Microsoft.VSTS.Build.IntegrationBuild` as the `ReflectedWorkItemIdField` on the target endpoint.
+    - Phases 3 and 4: run `TfsTestVariablesMigrationProcessor`, `TfsTestConfigurationsMigrationProcessor`, and then the test plans and suites processor.
+
+    Do not attempt to combine these phases into a single configuration run.
+  </Accordion>
+
+  <Accordion title="User identity fields (AssignedTo, ChangedBy) are wrong after migration">
+    **Symptom**
+
+    After migration, work items show the migration service account as the author or assignee of all revisions instead of the original users. Or, some user identities are missing or show as unresolved in the target.
+
+    **Cause**
+
+    User identity resolution works by matching display names or email addresses between the source and target systems. When users exist in both systems with the same email, the tool can match them automatically. When email addresses differ — for example, after a domain change, an organisational merger, or contractor-to-employee transitions — automatic matching fails and the migration account is used as a fallback.
+
+    **Solution**
+
+    **Step 1 — Export the user mapping**
+
+    Run `TfsExportUsersForMappingProcessor` to generate a mapping file that shows all source users and their matched (or unmatched) target users:
+
+    ```json
+    {
+      "MigrationTools": {
+        "CommonTools": {
+          "TfsUserMappingTool": {
+            "Enabled": true,
+            "UserMappingFile": "C:\\temp\\userExport.json",
+            "IdentityFieldsToCheck": [
+              "System.AssignedTo",
+              "System.ChangedBy",
+              "System.CreatedBy",
+              "Microsoft.VSTS.Common.ActivatedBy",
+              "Microsoft.VSTS.Common.ResolvedBy",
+              "Microsoft.VSTS.Common.ClosedBy"
+            ]
+          }
+        },
+        "Processors": [
+          {
+            "ProcessorType": "TfsExportUsersForMappingProcessor",
+            "Enabled": true,
+            "OnlyListUsersInWorkItems": true,
+            "WIQLQuery": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject AND [System.WorkItemType] NOT IN ('Test Suite', 'Test Plan','Shared Steps','Shared Parameter','Feedback Request') ORDER BY [System.ChangedDate] desc",
+            "SourceName": "Source",
+            "TargetName": "Target"
+          }
+        ]
+      }
+    }
+    ```
+
+    **Step 2 — Edit the mapping file**
+
+    Open the generated `userExport.json` and fill in the `"target"` entry for any user where it is `null`. The format is:
+
+    ```json
+    [
+      {
+        "Source": {
+          "FriendlyName": "Martin Hinshelwood nkdAgility.com",
+          "AccountName": "martin@nkdagility.com"
+        },
+        "target": {
+          "FriendlyName": "Hinshelwood, Martin",
+          "AccountName": "martin@othercompany.com"
+        }
+      }
+    ]
+    ```
+
+    **Step 3 — Run migration with the mapping file**
+
+    Point `TfsUserMappingTool` at the edited file during the main migration run. The tool will apply the mappings to all identity fields listed in `IdentityFieldsToCheck`.
+
+    See the [User mappings guide](/how-to/user-mappings) for a complete walkthrough.
+
+    <Tip>
+      Use `OnlyListUsersInWorkItems: true` when running the export processor to limit the export to users who actually appear in work items matching your query. This produces a smaller, more manageable file than exporting all users in the project collection.
+    </Tip>
+  </Accordion>
+
+  <Accordion title="'Make requests on behalf of others' permission is missing">
+    **Symptom**
+
+    Work item revision history is migrated but all revisions show the migration service account as the `ChangedBy` user instead of the original author. The log may also contain warnings about identity fields not being set correctly.
+
+    **Cause**
+
+    Setting `ChangedBy`, `CreatedBy`, and similar identity fields to a user other than the account running the migration requires the **"Make requests on behalf of others"** permission. This permission is not included in the "Project Collection Administrators" group by default in on-premises TFS.
+
+    **Solution**
+
+    For **on-premises TFS**, add the migration user to the "Project Collection Service Accounts" group using `tfssecurity`:
+
+    ```cmd
+    tfssecurity /g+ "Project Collection Service Accounts" n:domain\migrationuser ALLOW /server:http://myserver:8080/tfs
+    ```
+
+    Replace `domain\migrationuser` with the account running the migration, and update the server URL to match your TFS instance.
+
+    For **Azure DevOps Services**, ensure the migration account is a member of the **Project Collection Administrators** group. The "Make requests on behalf of others" permission is managed differently in the hosted service and is typically included at that level.
+
+    <Warning>
+      Adding a user to "Project Collection Service Accounts" grants significant trust. Use a dedicated service account for migrations rather than a personal account.
+    </Warning>
+  </Accordion>
+</AccordionGroup>
+
+## Getting further help
+
+If you cannot resolve an issue using this page, the following resources are available:
+
+<CardGroup cols={2}>
+  <Card title="GitHub Discussions" icon="github" href="https://github.com/nkdAgility/azure-devops-migration-tools/discussions">
+    Post questions and search existing discussions. Community support from contributors and users.
+  </Card>
+  <Card title="GitHub Issues" icon="bug" href="https://github.com/nkdAgility/azure-devops-migration-tools/issues">
+    Report confirmed bugs with logs and reproduction steps.
+  </Card>
+  <Card title="Pre-migration validation" icon="shield-check" href="/troubleshooting/validation">
+    Understand and fix validation errors that stop migration before it starts.
+  </Card>
+  <Card title="Permissions reference" icon="lock" href="/setup/permissions">
+    Full list of required PAT scopes and group memberships.
+  </Card>
+</CardGroup>

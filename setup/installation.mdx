@@ -1,0 +1,101 @@
+---
+title: Installation
+description: Install the Azure DevOps Migration Tools on Windows using Winget, Chocolatey, or a manual ZIP download.
+---
+
+The Azure DevOps Migration Tools are a portable Windows application. Choose the installation method that fits your environment.
+
+<Warning>
+  Do not install using an elevated (Administrator) command prompt when using Winget. The tools are installed per-user and elevated prompts will put files in the wrong location.
+</Warning>
+
+## Option 1: Winget (recommended for Windows 10/11)
+
+[Winget](https://learn.microsoft.com/en-us/windows/package-manager/winget/) is the Windows package manager built into Windows 10 and Windows 11.
+
+<Steps>
+  <Step title="Open a terminal">
+    Open **Windows Terminal** or any command prompt (not elevated).
+  </Step>
+  <Step title="Run the install command">
+    ```bash
+    winget install nkdAgility.AzureDevOpsMigrationTools
+    ```
+  </Step>
+  <Step title="Verify the installation">
+    Once installed, run the following to confirm the tool is on your path:
+
+    ```bash
+    devopsmigration version
+    ```
+  </Step>
+</Steps>
+
+The tools are installed to `%LOCALAPPDATA%\Microsoft\WinGet\Packages\nkdAgility.AzureDevOpsMigrationTools_Microsoft.Winget.Source_XXXXXXXXXX`. A symbolic link to `devopsmigration.exe` is created so you can run it from anywhere using `devopsmigration init` or `devopsmigration execute`.
+
+## Option 2: Chocolatey (recommended for Windows Server)
+
+[Chocolatey](https://chocolatey.org/packages/nkdagility.azuredevopsmigrationtools) is a package manager commonly used in server environments and CI pipelines.
+
+<Steps>
+  <Step title="Open an elevated command prompt">
+    Chocolatey typically requires Administrator privileges to install packages.
+  </Step>
+  <Step title="Run the install command">
+    ```bash
+    choco install vsts-sync-migrator
+    ```
+  </Step>
+  <Step title="Verify the installation">
+    The tools are installed to `C:\Tools\MigrationTools\`, which is added to the system `PATH`. Confirm with:
+
+    ```cmd
+    devopsmigration.exe version
+    ```
+  </Step>
+</Steps>
+
+## Option 3: Manual ZIP
+
+If you cannot use a package manager, download the latest release directly from GitHub.
+
+<Steps>
+  <Step title="Download the latest release">
+    Go to the [latest release page](https://github.com/nkdAgility/azure-devops-migration-tools/releases/latest) and download the `.zip` archive.
+  </Step>
+  <Step title="Unblock the archive">
+    Windows may block downloaded ZIP files. Before extracting, right-click the `.zip` file and open **Properties**. If you see an **Unblock** checkbox at the bottom of the General tab, check it and click **OK**.
+
+    <Note>
+      On Windows 11, you may need to click **Show more options** to access the classic Properties dialog.
+    </Note>
+  </Step>
+  <Step title="Extract to a folder">
+    Extract the contents to a folder of your choice, for example `C:\Tools\MigrationTools\`.
+  </Step>
+  <Step title="Add to PATH (optional)">
+    To run `devopsmigration` from any directory, add the extraction folder to your system or user `PATH` environment variable.
+  </Step>
+</Steps>
+
+## Side-by-side comparison
+
+<CodeGroup>
+
+```bash Winget
+winget install nkdAgility.AzureDevOpsMigrationTools
+```
+
+```bash Chocolatey
+choco install vsts-sync-migrator
+```
+
+</CodeGroup>
+
+## Next steps
+
+Once installed, follow these guides to complete your setup:
+
+1. [Configure permissions](/setup/permissions) for your source and target.
+2. [Add the ReflectedWorkItemId field](/setup/reflected-workitem-id) to your target project.
+3. [Run your first migration](/get-started/quickstart).

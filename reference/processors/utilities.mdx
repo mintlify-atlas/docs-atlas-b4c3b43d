@@ -1,0 +1,592 @@
+---
+title: Utility processors
+description: Configuration reference for utility processors including TfsExportUsersForMappingProcessor, TfsTeamSettingsProcessor, TfsSharedQueryProcessor, ProcessDefinitionProcessor, TfsWorkItemDeleteProcessor, OutboundLinkCheckingProcessor, KeepOutboundLinkTargetProcessor, TfsWorkItemOverwriteAreasAsTagsProcessor, and TfsWorkItemTypeValidatorProcessor.
+---
+
+Utility processors perform supporting tasks around a migration: exporting user lists, migrating team settings and shared queries, syncing process definitions, cleaning up work items, and validating link integrity. They are typically run before or after the main `TfsWorkItemMigrationProcessor`.
+
+---
+
+## TfsExportUsersForMappingProcessor
+
+Generates a starter user mapping file by comparing users found in source work items with users in the target collection. The resulting file is used as input for the `TfsUserMappingTool` enricher to map identities during migration.
+
+<Note>
+  Run this processor **before** the main migration to generate the user mapping file.
+  Edit the generated file to correct any automatic matches before using it in the migration.
+</Note>
+
+### Configuration options
+
+<ParamField body="ProcessorType" type="string" required>
+  Must be set to `"TfsExportUsersForMappingProcessor"`.
+</ParamField>
+
+<ParamField body="Enabled" type="boolean" required>
+  Set to `true` to run this processor.
+</ParamField>
+
+<ParamField body="SourceName" type="string" required>
+  The source endpoint from which work items and user information are read.
+</ParamField>
+
+<ParamField body="TargetName" type="string" required>
+  The target endpoint used to look up matching users in the target collection.
+</ParamField>
+
+<ParamField body="WIQLQuery" type="string">
+  WIQL query to select the work items from which user information is extracted. When
+  `null`, user information is not gathered from work items (relevant only when
+  `ExportAllUsers` is `true`).
+</ParamField>
+
+<ParamField body="OnlyListUsersInWorkItems" type="boolean" default="true">
+  When `true`, only users that appear in the selected work items are included in the
+  export. When `false`, all users in the source collection may be included.
+</ParamField>
+
+<ParamField body="ExportAllUsers" type="boolean">
+  When `true`, exports all users from both the source and target collections to the
+  file specified by `UserExportFile`. Useful when building a mapping file manually.
+</ParamField>
+
+<ParamField body="UserExportFile" type="string">
+  File path where the exported user list is written. Used when `ExportAllUsers` is
+  `true`. The file is in JSON format and can be used as a reference for building the
+  user mapping.
+</ParamField>
+
+### Configuration example
+
+```json
+{
+  "ProcessorType": "TfsExportUsersForMappingProcessor",
+  "Enabled": true,
+  "SourceName": "Source",
+  "TargetName": "Target",
+  "WIQLQuery": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject AND [System.WorkItemType] NOT IN ('Test Suite', 'Test Plan','Shared Steps','Shared Parameter','Feedback Request') ORDER BY [System.ChangedDate] desc",
+  "OnlyListUsersInWorkItems": true,
+  "ExportAllUsers": false,
+  "UserExportFile": null
+}
+```
+
+---
+
+## TfsTeamSettingsProcessor
+
+Migrates team definitions and their settings (backlogs, boards, capacity) from a source project to a target project.
+
+<Warning>
+  **Beta processor.** Team capacity is only migrated when a team member with the same
+  display name exists in the target collection. Members without a match in the target
+  are silently skipped.
+</Warning>
+
+### Configuration options
+
+<ParamField body="ProcessorType" type="string" required>
+  Must be set to `"TfsTeamSettingsProcessor"`.
+</ParamField>
+
+<ParamField body="Enabled" type="boolean" required>
+  Set to `true` to run this processor.
+</ParamField>
+
+<ParamField body="SourceName" type="string" required>
+  The source endpoint from which team configurations are read.
+</ParamField>
+
+<ParamField body="TargetName" type="string" required>
+  The target endpoint where team configurations are written.
+</ParamField>
+
+<ParamField body="Teams" type="string[]">
+  List of team names to migrate. When `null`, all teams in the source project are
+  migrated.
+</ParamField>
+
+<ParamField body="MigrateTeamSettings" type="boolean" default="false">
+  When `true`, migrates team settings (backlog levels, working days, bug behaviour)
+  from the source team to the target team after creation.
+</ParamField>
+
+<ParamField body="UpdateTeamSettings" type="boolean" default="false">
+  When `true`, resets an already-existing target team's settings to match the source.
+  When `false`, settings for existing teams are not updated.
+</ParamField>
+
+<ParamField body="MigrateTeamCapacities" type="boolean" default="false">
+  When `true`, migrates sprint capacity entries for each team member. Only members
+  with matching display names in the target collection are migrated.
+</ParamField>
+
+<ParamField body="PrefixProjectToNodes" type="boolean" default="false">
+  When `true`, prefixes area and iteration path nodes with the source project name.
+  Must match the setting used in your node structure migration configuration.
+</ParamField>
+
+<ParamField body="UseUserMapping" type="boolean">
+  When `true`, uses the user mapping file (from `TfsTeamSettingsTool`) to match team
+  members by mapped name in addition to display name. Enables capacity migration when
+  display names differ between source and target.
+</ParamField>
+
+### Configuration example
+
+```json
+{
+  "ProcessorType": "TfsTeamSettingsProcessor",
+  "Enabled": true,
+  "SourceName": "Source",
+  "TargetName": "Target",
+  "Teams": null,
+  "MigrateTeamSettings": true,
+  "UpdateTeamSettings": false,
+  "MigrateTeamCapacities": false,
+  "PrefixProjectToNodes": false,
+  "UseUserMapping": false
+}
+```
+
+---
+
+## TfsSharedQueryProcessor
+
+Migrates shared query folders and queries from a source project to a target project.
+
+<Warning>
+  **Beta processor.** Query field references are not automatically remapped. If field
+  names differ between source and target process templates, use `SourceToTargetFieldMappings`
+  to translate them.
+</Warning>
+
+### Configuration options
+
+<ParamField body="ProcessorType" type="string" required>
+  Must be set to `"TfsSharedQueryProcessor"`.
+</ParamField>
+
+<ParamField body="Enabled" type="boolean" required>
+  Set to `true` to run this processor.
+</ParamField>
+
+<ParamField body="SourceName" type="string" required>
+  The source endpoint from which shared queries are read.
+</ParamField>
+
+<ParamField body="TargetName" type="string" required>
+  The target endpoint where shared queries are written.
+</ParamField>
+
+<ParamField body="SharedFolderName" type="string" default="Shared Queries">
+  The name of the root shared queries folder. This is the standard Azure DevOps folder
+  name and rarely needs to be changed.
+</ParamField>
+
+<ParamField body="PrefixProjectToNodes" type="boolean" default="false">
+  When `true`, the source project name is added as a prefix to query folder paths in
+  the target. Use this to keep queries from multiple source projects organized under
+  separate sub-folders in a single target project.
+</ParamField>
+
+<ParamField body="SourceToTargetFieldMappings" type="object">
+  A dictionary mapping source field reference names to target field reference names.
+  Use this when field names differ between source and target process templates so that
+  WIQL inside queries resolves correctly in the target.
+
+  Example:
+  ```json
+  "SourceToTargetFieldMappings": {
+    "Custom.OldField": "Custom.NewField"
+  }
+  ```
+</ParamField>
+
+### Configuration example
+
+```json
+{
+  "ProcessorType": "TfsSharedQueryProcessor",
+  "Enabled": true,
+  "SourceName": "Source",
+  "TargetName": "Target",
+  "SharedFolderName": "Shared Queries",
+  "PrefixProjectToNodes": false,
+  "SourceToTargetFieldMappings": null
+}
+```
+
+---
+
+## ProcessDefinitionProcessor
+
+Synchronizes process definition (work item type) customizations between two Azure DevOps organizations. This processor uses the Azure DevOps REST API and works with inherited processes only — it does not support XML-based process templates.
+
+<Warning>
+  **Beta processor.** Requires `AzureDevOpsEndpoint` endpoints. Does not work with
+  on-premises TFS or XML process templates.
+</Warning>
+
+### Configuration options
+
+<ParamField body="ProcessorType" type="string" required>
+  Must be set to `"ProcessDefinitionProcessor"`.
+</ParamField>
+
+<ParamField body="Enabled" type="boolean" required>
+  Set to `true` to run this processor.
+</ParamField>
+
+<ParamField body="SourceName" type="string" required>
+  The source `AzureDevOpsEndpoint` to read process definitions from.
+</ParamField>
+
+<ParamField body="TargetName" type="string" required>
+  The target `AzureDevOpsEndpoint` to write process definitions to.
+</ParamField>
+
+<ParamField body="Processes" type="object">
+  A dictionary mapping process names to lists of work item type names to include in
+  the migration. When `null`, all work item types within all processes are migrated.
+
+  Example:
+  ```json
+  "Processes": {
+    "MyAgileProcess": ["Bug", "User Story", "Task"]
+  }
+  ```
+</ParamField>
+
+<ParamField body="ProcessMaps" type="object">
+  A dictionary mapping source process names to target process names. Use this when the
+  process has been renamed between organizations or when the source and target use
+  different inherited process names.
+
+  Example:
+  ```json
+  "ProcessMaps": {
+    "SourceProcessName": "TargetProcessName"
+  }
+  ```
+</ParamField>
+
+<ParamField body="UpdateProcessDetails" type="boolean">
+  When `true`, updates existing process definitions in the target rather than only
+  creating new ones. Set to `false` to add only new work item types and fields without
+  modifying existing ones.
+</ParamField>
+
+<ParamField body="MaxDegreeOfParallelism" type="integer">
+  Maximum number of parallel operations during process definition migration. Set to `0`
+  or `1` for sequential execution. Higher values can speed up migration of large
+  processes but may cause throttling.
+</ParamField>
+
+### Configuration example
+
+```json
+{
+  "ProcessorType": "ProcessDefinitionProcessor",
+  "Enabled": true,
+  "SourceName": "Source",
+  "TargetName": "Target",
+  "Processes": null,
+  "ProcessMaps": null,
+  "UpdateProcessDetails": false,
+  "MaxDegreeOfParallelism": 0
+}
+```
+
+---
+
+## TfsWorkItemDeleteProcessor
+
+Permanently deletes work items from a project that match a WIQL query or explicit ID list.
+
+<Warning>
+  **Destructive operation.** Deleted work items cannot be recovered through normal
+  means. Use `WhatIf` mode (not available on this processor — use the WIQL query
+  carefully) and test on a non-production instance first. Ensure you have a backup or
+  snapshot before running this processor.
+</Warning>
+
+### Configuration options
+
+<ParamField body="ProcessorType" type="string" required>
+  Must be set to `"TfsWorkItemDeleteProcessor"`.
+</ParamField>
+
+<ParamField body="Enabled" type="boolean" required>
+  Set to `true` to run this processor.
+</ParamField>
+
+<ParamField body="SourceName" type="string" required>
+  The endpoint from which work items are selected for deletion.
+</ParamField>
+
+<ParamField body="TargetName" type="string" required>
+  The endpoint where work items are deleted. For delete operations this is typically
+  the same as `SourceName`.
+</ParamField>
+
+<ParamField body="WIQLQuery" type="string" default="SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject AND [System.WorkItemType] NOT IN ('Test Suite', 'Test Plan','Shared Steps','Shared Parameter','Feedback Request') ORDER BY [System.ChangedDate] desc">
+  A flat WIQL query that selects the work items to delete. Review this query carefully
+  — all work items returned will be permanently deleted.
+</ParamField>
+
+<ParamField body="WorkItemIDs" type="integer[]">
+  An explicit list of work item IDs to delete. When specified, takes precedence over
+  `WIQLQuery`.
+</ParamField>
+
+<ParamField body="FilterWorkItemsThatAlreadyExistInTarget" type="boolean">
+  When `true`, filters out work items from the delete list that already exist in the
+  target (based on reflected ID). Typically set to `false` for delete operations.
+</ParamField>
+
+<ParamField body="PauseAfterEachWorkItem" type="boolean">
+  When `true`, pauses after each deletion for review. For debugging only.
+</ParamField>
+
+<ParamField body="WorkItemCreateRetryLimit" type="integer">
+  Number of retry attempts for deletion operations that fail due to transient errors.
+</ParamField>
+
+### Configuration example
+
+```json
+{
+  "ProcessorType": "TfsWorkItemDeleteProcessor",
+  "Enabled": true,
+  "SourceName": "Target",
+  "TargetName": "Target",
+  "WIQLQuery": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject AND [System.Tags] CONTAINS 'DeleteMe' ORDER BY [System.ChangedDate] desc",
+  "WorkItemIDs": null,
+  "FilterWorkItemsThatAlreadyExistInTarget": false,
+  "PauseAfterEachWorkItem": false,
+  "WorkItemCreateRetryLimit": 0
+}
+```
+
+---
+
+## OutboundLinkCheckingProcessor
+
+Checks outbound links on work items and reports broken or invalid links to a file. This is a read-only diagnostic processor — it does not modify any work items.
+
+### Configuration options
+
+<ParamField body="ProcessorType" type="string" required>
+  Must be set to `"OutboundLinkCheckingProcessor"`.
+</ParamField>
+
+<ParamField body="Enabled" type="boolean" required>
+  Set to `true` to run this processor.
+</ParamField>
+
+<ParamField body="SourceName" type="string" required>
+  The endpoint from which work items are read for link checking.
+</ParamField>
+
+<ParamField body="TargetName" type="string" required>
+  The target endpoint (used for context in link resolution).
+</ParamField>
+
+<ParamField body="WIQLQuery" type="string" required>
+  A flat WIQL query selecting the work items whose outbound links should be checked.
+</ParamField>
+
+<ParamField body="ResultFileName" type="string" required>
+  File path where the link checking results are written. The output lists work items
+  with broken or unresolvable outbound links.
+</ParamField>
+
+### Configuration example
+
+```json
+{
+  "ProcessorType": "OutboundLinkCheckingProcessor",
+  "Enabled": true,
+  "SourceName": "Source",
+  "TargetName": "Target",
+  "WIQLQuery": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject ORDER BY [System.ChangedDate] desc",
+  "ResultFileName": "C:/temp/outbound-link-check-results.json"
+}
+```
+
+---
+
+## KeepOutboundLinkTargetProcessor
+
+Identifies outbound links on work items that point to a specific Azure DevOps organization and project, and generates a cleanup script for removing links that target other organizations. This supports scenarios where links from a migrated project need to be cleaned up to point only to the new target location.
+
+### Configuration options
+
+<ParamField body="ProcessorType" type="string" required>
+  Must be set to `"KeepOutboundLinkTargetProcessor"`.
+</ParamField>
+
+<ParamField body="Enabled" type="boolean" required>
+  Set to `true` to run this processor.
+</ParamField>
+
+<ParamField body="SourceName" type="string" required>
+  The endpoint from which work items are read.
+</ParamField>
+
+<ParamField body="TargetName" type="string" required>
+  The target endpoint (used for link resolution context).
+</ParamField>
+
+<ParamField body="WIQLQuery" type="string" required>
+  A flat WIQL query selecting the work items whose outbound links should be evaluated.
+</ParamField>
+
+<ParamField body="TargetLinksToKeepOrganization" type="string">
+  The URL of the Azure DevOps organization whose links should be preserved. Links
+  pointing to other organizations will be included in the cleanup script.
+
+  Example: `"https://dev.azure.com/myorganization"`
+</ParamField>
+
+<ParamField body="TargetLinksToKeepProject" type="string">
+  The project name or GUID within `TargetLinksToKeepOrganization` whose links should
+  be preserved.
+</ParamField>
+
+<ParamField body="CleanupFileName" type="string">
+  File path where the generated cleanup batch script is written.
+</ParamField>
+
+<ParamField body="PrependCommand" type="string">
+  Command prepended to each line in the cleanup script. Use `"start"` for Windows
+  batch files that open URLs in a browser, or leave empty for raw URL output.
+</ParamField>
+
+<ParamField body="DryRun" type="boolean">
+  When `true`, generates the cleanup script without making any changes. Review the
+  script before setting to `false` and re-running to apply changes.
+</ParamField>
+
+### Configuration example
+
+```json
+{
+  "ProcessorType": "KeepOutboundLinkTargetProcessor",
+  "Enabled": true,
+  "SourceName": "Source",
+  "TargetName": "Target",
+  "WIQLQuery": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject AND [System.WorkItemType] NOT IN ('Test Suite', 'Test Plan','Shared Steps','Shared Parameter','Feedback Request') ORDER BY [System.ChangedDate] desc",
+  "TargetLinksToKeepOrganization": "https://dev.azure.com/myorganization",
+  "TargetLinksToKeepProject": "MyProject",
+  "CleanupFileName": "C:/temp/cleanup-links.bat",
+  "PrependCommand": "start",
+  "DryRun": true
+}
+```
+
+---
+
+## TfsWorkItemOverwriteAreasAsTagsProcessor
+
+Converts area path hierarchy into tags on work items. A common issue in older TFS or Azure DevOps instances is excessive proliferation of area paths. This processor reads the area path hierarchy under a specified root and converts each level into a tag on each work item, allowing you to remove deep area path hierarchies while preserving their information as tags.
+
+<Warning>
+  **Beta processor.** This modifies work items in place. Run with a small test set
+  first to verify tag format before applying to all work items.
+</Warning>
+
+### Configuration options
+
+<ParamField body="ProcessorType" type="string" required>
+  Must be set to `"TfsWorkItemOverwriteAreasAsTagsProcessor"`.
+</ParamField>
+
+<ParamField body="Enabled" type="boolean" required>
+  Set to `true` to run this processor.
+</ParamField>
+
+<ParamField body="SourceName" type="string" required>
+  The endpoint from which work items are read.
+</ParamField>
+
+<ParamField body="TargetName" type="string" required>
+  The endpoint where tags are written to work items.
+</ParamField>
+
+<ParamField body="AreaIterationPath" type="string" default="\">
+  The root area path from which to convert area path nodes into tags. Use `\` to
+  process all area paths from the project root. Specify a sub-path to limit
+  conversion to a specific area hierarchy.
+</ParamField>
+
+### Configuration example
+
+```json
+{
+  "ProcessorType": "TfsWorkItemOverwriteAreasAsTagsProcessor",
+  "Enabled": true,
+  "SourceName": "Source",
+  "TargetName": "Target",
+  "AreaIterationPath": "\\"
+}
+```
+
+---
+
+## TfsWorkItemTypeValidatorProcessor
+
+Validates that all work item types referenced in source work items exist in the target project's process template before migration begins. This processor does not make any changes to source or target — it is a pre-flight check.
+
+<Note>
+  Validation runs even when `Enabled` is set to `false`. The `Enabled` flag controls
+  only whether the migration halts on validation failures (when combined with
+  `StopIfValidationFails`).
+</Note>
+
+### Configuration options
+
+<ParamField body="ProcessorType" type="string" required>
+  Must be set to `"TfsWorkItemTypeValidatorProcessor"`.
+</ParamField>
+
+<ParamField body="Enabled" type="boolean" required>
+  Set to `true` to activate this processor. Note that validation always runs; this
+  flag affects whether missing types cause a hard stop.
+</ParamField>
+
+<ParamField body="SourceName" type="string" required>
+  The source endpoint from which work item type names are read.
+</ParamField>
+
+<ParamField body="TargetName" type="string" required>
+  The target endpoint against which work item types are validated.
+</ParamField>
+
+<ParamField body="StopIfValidationFails" type="boolean" default="true">
+  When `true`, the migration process halts if any work item type found in the source
+  does not exist in the target process template. When `false`, validation errors are
+  logged as warnings and the migration continues. Set to `false` if you have multiple
+  validation processors and want to collect all errors before stopping.
+</ParamField>
+
+### Configuration example
+
+```json
+{
+  "ProcessorType": "TfsWorkItemTypeValidatorProcessor",
+  "Enabled": true,
+  "SourceName": "Source",
+  "TargetName": "Target",
+  "StopIfValidationFails": true
+}
+```
+
+---
+
+## Related references
+
+- [TfsWorkItemMigrationProcessor](/reference/processors/work-item-migration) — the primary migration processor
+- [TfsTestPlansAndSuitesMigrationProcessor](/reference/processors/test-plans-suites) — test plan migration
+- [Field maps reference](/reference/field-maps) — configure field value transformations

@@ -1,0 +1,241 @@
+---
+title: "Endpoints"
+description: "Configure Source and Target endpoints for Azure DevOps Migration Tools — TfsTeamProjectEndpoint settings, authentication modes, and connection options."
+---
+
+Endpoints define the Azure DevOps or TFS connections the tool uses during migration. Every configuration requires a `Source` endpoint (where data is read from) and a `Target` endpoint (where data is written to). Both are defined inside `MigrationTools.Endpoints`.
+
+```json
+{
+  "MigrationTools": {
+    "Endpoints": {
+      "Source": { ... },
+      "Target": { ... }
+    }
+  }
+}
+```
+
+## TfsTeamProjectEndpoint
+
+`TfsTeamProjectEndpoint` is the primary endpoint type for connecting to Azure DevOps Services, Azure DevOps Server, and on-premises TFS instances. Set `EndpointType` to `"TfsTeamProjectEndpoint"` for both Source and Target.
+
+### Full example
+
+The following shows a complete Source and Target configuration taken from `configuration-default.json`:
+
+<CodeGroup>
+
+```json Source endpoint
+{
+  "EndpointType": "TfsTeamProjectEndpoint",
+  "AllowCrossProjectLinking": false,
+  "ReflectedWorkItemIdField": "Custom.ReflectedWorkItemId",
+  "Authentication": {
+    "AuthenticationMode": "AccessToken",
+    "AccessToken": "",
+    "NetworkCredentials": {
+      "UserName": "",
+      "Password": "",
+      "Domain": ""
+    }
+  },
+  "LanguageMaps": {
+    "AreaPath": "Area",
+    "IterationPath": "Iteration"
+  }
+}
+```
+
+```json Target endpoint
+{
+  "EndpointType": "TfsTeamProjectEndpoint",
+  "Collection": "https://dev.azure.com/nkdagility-preview/",
+  "Project": "migrationTest55",
+  "Authentication": {
+    "AuthenticationMode": "AccessToken",
+    "AccessToken": "",
+    "NetworkCredentials": {
+      "UserName": "",
+      "Password": "",
+      "Domain": ""
+    }
+  },
+  "ReflectedWorkItemIdField": "nkdScrum.ReflectedWorkItemId",
+  "AllowCrossProjectLinking": false,
+  "LanguageMaps": {
+    "AreaPath": "Area",
+    "IterationPath": "Iteration"
+  }
+}
+```
+
+</CodeGroup>
+
+### Configuration options
+
+<ParamField body="EndpointType" type="string" required>
+  Must be `"TfsTeamProjectEndpoint"` for TFS or Azure DevOps connections.
+</ParamField>
+
+<ParamField body="Collection" type="string" required>
+  The full URL to your Azure DevOps organisation or TFS collection. For Azure DevOps Services: `https://dev.azure.com/your-org/`. For on-premises TFS: `https://tfs.yourcompany.com/tfs/DefaultCollection`.
+</ParamField>
+
+<ParamField body="Project" type="string" required>
+  The name of the team project within the collection. Must match exactly, including case.
+</ParamField>
+
+<ParamField body="ProductVersion" type="string" default="OnPremises">
+  Specifies which version family of TFS/Azure DevOps the endpoint connects to. Controls compatibility and feature support. Valid values:
+  - `"Cloud"` — Azure DevOps Services (hosted at `dev.azure.com`)
+  - `"OnPremises"` — Azure DevOps Server or TFS 2013+ (default)
+  - `"OnPremisesClassic"` — Legacy TFS versions prior to 2013 (limited support)
+
+  When omitted, defaults to `"OnPremises"`.
+</ParamField>
+
+<ParamField body="ReflectedWorkItemIdField" type="string" required>
+  The reference name of the custom field used to store the source work item ID on migrated items. This field must exist in your target process template. Common values:
+  - `"Custom.ReflectedWorkItemId"` (source)
+  - `"nkdScrum.ReflectedWorkItemId"` (target, when using the nkdScrum process template)
+
+  The tool uses this field to detect work items that have already been migrated, preventing duplicates.
+</ParamField>
+
+<ParamField body="AllowCrossProjectLinking" type="boolean" default="false">
+  When `true`, allows work item links that point to work items in other projects to be preserved during migration. Set to `false` if your migration is scoped to a single project pair.
+</ParamField>
+
+<ParamField body="Authentication" type="object" required>
+  Authentication credentials for connecting to the endpoint. See [Authentication](#authentication) below.
+</ParamField>
+
+<ParamField body="LanguageMaps" type="object">
+  Maps the localised names for Area and Iteration path nodes in non-English TFS installations. For English installations, use the defaults shown below.
+
+  ```json
+  "LanguageMaps": {
+    "AreaPath": "Area",
+    "IterationPath": "Iteration"
+  }
+  ```
+
+  For German installations, for example, this would be `"Bereich"` and `"Iteration"`.
+</ParamField>
+
+## Authentication
+
+The `Authentication` block inside each endpoint controls how the tool connects to TFS or Azure DevOps.
+
+<ParamField body="AuthenticationMode" type="string" required>
+  Determines which credential type is used. Valid values:
+  - `"AccessToken"` — Personal Access Token (recommended for Azure DevOps Services and modern Azure DevOps Server)
+  - `"Windows"` — NTLM/Windows credentials (required for older on-premises TFS)
+  - `"Prompt"` — Interactive browser prompt (useful for testing; not recommended for automated runs)
+</ParamField>
+
+<Tabs>
+  <Tab title="AccessToken (recommended)">
+    Use a Personal Access Token (PAT) from Azure DevOps. This is the recommended approach for Azure DevOps Services and modern Azure DevOps Server installations.
+
+    ```json
+    "Authentication": {
+      "AuthenticationMode": "AccessToken",
+      "AccessToken": "your-pat-token-here",
+      "NetworkCredentials": {
+        "UserName": "",
+        "Password": "",
+        "Domain": ""
+      }
+    }
+    ```
+
+    <ParamField body="AccessToken" type="string">
+      Your Personal Access Token. The PAT must have **Work Items (Read & Write)** scope at minimum. For full migrations including test plans, attachments, and team settings, grant broader scopes.
+
+      You can also supply the token via an environment variable instead of hardcoding it in the file. Set the environment variable `MigrationTools__Endpoints__Source__Authentication__AccessToken` (or `Target`) and leave `AccessToken` empty in the JSON.
+    </ParamField>
+  </Tab>
+  <Tab title="Windows (NTLM)">
+    Use Windows credentials (NTLM). This is required for older on-premises TFS instances that do not support PAT authentication.
+
+    ```json
+    "Authentication": {
+      "AuthenticationMode": "Windows",
+      "AccessToken": "",
+      "NetworkCredentials": {
+        "UserName": "domain\\username",
+        "Password": "password",
+        "Domain": "YOURDOMAIN"
+      }
+    }
+    ```
+
+    <ParamField body="NetworkCredentials.UserName" type="string">
+      The Windows username. Include the domain prefix if required: `"DOMAIN\\username"`.
+    </ParamField>
+
+    <ParamField body="NetworkCredentials.Password" type="string">
+      The Windows account password.
+    </ParamField>
+
+    <ParamField body="NetworkCredentials.Domain" type="string">
+      The Windows domain name. Can be left empty if the domain is included in `UserName`.
+    </ParamField>
+  </Tab>
+</Tabs>
+
+<Warning>
+  Never commit access tokens or passwords to source control. Use environment variables or a secrets manager to inject credentials at runtime. The tool supports environment variable substitution for `AccessToken` via the naming convention `MigrationTools__Endpoints__Source__Authentication__AccessToken`.
+</Warning>
+
+## AzureDevOpsEndpoint
+
+`AzureDevOpsEndpoint` is a REST API-based endpoint used primarily for pipeline and process-related migrations. It provides HTTP client access for operations that are not supported by the standard TFS object model.
+
+### When to use it
+
+Use `AzureDevOpsEndpoint` when running the `AzureDevOpsPipelineProcessor` to migrate task groups, build pipelines, and release pipelines. For standard work item migrations, use `TfsTeamProjectEndpoint` instead.
+
+### Configuration
+
+```json
+{
+  "EndpointType": "AzureDevOpsEndpoint",
+  "Collection": "https://dev.azure.com/your-org/",
+  "Project": "your-project",
+  "Authentication": {
+    "AuthenticationMode": "AccessToken",
+    "AccessToken": "your-pat-token-here"
+  },
+  "ReflectedWorkItemIdField": "Custom.ReflectedWorkItemId"
+}
+```
+
+The configuration options are the same as `TfsTeamProjectEndpoint`. The endpoint type is distinguished by the `EndpointType` field value.
+
+### Behaviour
+
+- Maintains connection pooling for efficient HTTP operations during bulk migrations.
+- Automatically handles Azure DevOps API rate limits.
+- Includes retry logic for transient failures.
+- Uses the `ReflectedWorkItemIdField` to track migrated items and prevent duplication.
+
+<Note>
+  The `AzureDevOpsEndpoint` requires the target organisation and project to already exist and be accessible. Ensure the PAT has appropriate permissions for the resource types you are migrating (pipelines, task groups, etc.).
+</Note>
+
+## Supplying credentials via environment variables
+
+Rather than storing credentials in `configuration.json`, you can use environment variable overrides. The tool supports the standard .NET configuration pattern using double-underscore (`__`) as a path separator:
+
+```bash
+# Source endpoint PAT
+export MigrationTools__Endpoints__Source__Authentication__AccessToken="your-source-token"
+
+# Target endpoint PAT
+export MigrationTools__Endpoints__Target__Authentication__AccessToken="your-target-token"
+```
+
+Environment variables take precedence over values in the JSON file, making it safe to commit `configuration.json` with empty token fields.

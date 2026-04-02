@@ -1,0 +1,320 @@
+---
+title: Pre-migration validation
+description: Understand how the Azure DevOps Migration Tools validate your configuration before migration starts, and how to resolve common validation errors.
+---
+
+The migration tools run two rounds of validation before any data is written to the target system. This catches configuration and schema problems early — before you've committed time to loading data — and gives you actionable error messages to fix.
+
+## How validation works
+
+<Steps>
+  <Step title="Pre-data-load validation (TfsWorkItemTypeValidatorTool)">
+    Before any source data is fetched, the `TfsWorkItemTypeValidatorTool` runs automatically as part of `TfsWorkItemMigrationProcessor`. It compares the work item types and fields in your source project against the target project, applying any type mappings you have configured.
+
+    If any issue is found at this stage, migration stops immediately with exit code `-1`. No data is loaded and no records are written to the target.
+  </Step>
+  <Step title="Post-data-load validation (TfsValidateRequiredFieldTool)">
+    After source data has been queried but before it is written to the target, the `TfsValidateRequiredFieldTool` checks that every work item to be migrated has values for all required fields in the target work item type.
+
+    This prevents individual work item creation failures mid-migration and lets you set default values for fields that are required in the target but optional (or absent) in the source.
+  </Step>
+</Steps>
+
+<Note>
+  The `TfsWorkItemTypeValidatorTool` is **enabled by default**. You do not need to add it to your configuration for it to run. You can disable it explicitly, but doing so will produce a warning in the logs.
+</Note>
+
+## What the validator checks
+
+The `TfsWorkItemTypeValidatorTool` checks the following for each source work item type that falls within the scope of your migration:
+
+- **Work item type existence** — the type must exist in the target (or have a mapping configured via `WorkItemTypeMappingTool`)
+- **ReflectedWorkItemId field** — the custom tracking field must be present on every target work item type being migrated
+- **Field existence** — every source field must have a matching field in the corresponding target work item type
+- **Field type compatibility** — source and target field types must be compatible (e.g., both `Boolean`, both `String`)
+- **Allowed values compatibility** — fields with restricted value lists must have compatible allowed values
+
+Identity fields are automatically excluded from allowed-values checking because they almost always differ between source and target.
+
+## Reading the validation log
+
+When validation runs, the log output follows this pattern:
+
+```text
+[10:54:09 INF] Starting Pre-Validation: Validating work item types and fields with `WorkItemTypeValidatorTool`.
+[10:54:09 INF] Validating work item type 'Feature'
+[10:54:09 WRN]   'Feature' does not contain reflected work item ID field 'Custom.TfsWorkItemId'.
+[10:54:09 WRN]   Missing field 'Microsoft.VSTS.Common.AcceptanceCriteria' in 'Feature'.
+[10:54:09 INF] Validating work item type 'Risk'
+[10:54:09 WRN] Work item type 'Risk' does not exist in target system.
+[10:54:09 INF]  Suggested mapping: 'Risk' – 'Issue'
+[10:54:09 ERR] Some work item types or their fields are not present in the target system (see previous logs).
+```
+
+`WRN` lines describe individual validation failures. The `ERR` line at the end summarises the overall result and causes migration to stop.
+
+## Common validation errors and fixes
+
+<AccordionGroup>
+  <Accordion title="Work item type 'Risk' does not exist in target system">
+    **Symptom**
+
+    ```text
+    [WRN] Work item type 'Risk' does not exist in target system.
+    [INF]  Suggested mapping: 'Risk' – 'Issue'
+    ```
+
+    The source project contains a work item type that has no equivalent in the target project.
+
+    **Cause**
+
+    The source and target projects use different process templates, or the target project has not had all required work item types added to it.
+
+    **Solutions**
+
+    Choose one of the following approaches:
+
+    **Option 1 — Create the missing type in the target**
+
+    Add the work item type to the target project's process template. For inherited processes, use the Azure DevOps web UI under **Organisation Settings > Process**. For XML processes, export the process, add the type definition, and re-import.
+
+    **Option 2 — Map to an existing type**
+
+    Configure a `WorkItemTypeMappingTool` mapping to redirect the source type to an existing target type:
+
+    ```json
+    {
+      "MigrationTools": {
+        "CommonTools": {
+          "WorkItemTypeMappingTool": {
+            "Enabled": true,
+            "Mappings": {
+              "Risk": "Issue"
+            }
+          }
+        }
+      }
+    }
+    ```
+
+    The validator uses these mappings before checking for type existence, so once mapped the warning will not appear.
+
+    **Option 3 — Exclude the type from migration**
+
+    Update your `WIQLQuery` to exclude the work item type entirely:
+
+    ```text
+    SELECT [System.Id] FROM WorkItems
+    WHERE [System.TeamProject] = @TeamProject
+      AND [System.WorkItemType] NOT IN ('Test Suite', 'Test Plan', 'Risk')
+    ORDER BY [System.ChangedDate] desc
+    ```
+  </Accordion>
+
+  <Accordion title="'User Story' does not contain reflected work item ID field">
+    **Symptom**
+
+    ```text
+    [WRN] 'User Story' does not contain reflected work item ID field 'Custom.ReflectedWorkItemId'.
+    ```
+
+    **Cause**
+
+    The `ReflectedWorkItemId` custom field has not been added to one or more work item types in the target project. This field is how the tool tracks which source work items have already been migrated — without it, deduplication and resume behaviour cannot work.
+
+    **Solution**
+
+    Add the custom field to **every work item type** in your target project. The field must exist on all types, not just the first type you migrate.
+
+    Follow the [ReflectedWorkItemId setup guide](/setup/reflected-workitem-id) for step-by-step instructions covering:
+
+    - **Inherited process** (Azure DevOps created via the web UI): add a custom text field named `ReflectedWorkItemId` through **Organisation Settings > Process > [your process] > Work item types > [type] > New field**.
+    - **XML process** (on-premises TFS or Azure DevOps upgraded from TFS): export each work item type with `witadmin exportwitd`, add the field definition, and re-import with `witadmin importwitd`.
+
+    The reference name you need to use in `ReflectedWorkItemIdField` in your endpoint configuration depends on your process:
+
+    | Process type | Typical reference name |
+    |---|---|
+    | Inherited (Azure DevOps) | `Custom.ReflectedWorkItemId` |
+    | XML (TFS on-premises) | `TfsMigrationTool.ReflectedWorkItemId` |
+    | Imported XML collection | `Custom.ReflectedWorkItemId` |
+
+    <Warning>
+      You only need to add the `ReflectedWorkItemId` field to the **target** project. Do not add it to the source.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="Missing field 'Microsoft.VSTS.Common.CustomField' in 'User Story'">
+    **Symptom**
+
+    ```text
+    [WRN] Missing field 'Microsoft.VSTS.Common.AcceptanceCriteria' in 'Feature'.
+    [INF]   Source field reference name: Microsoft.VSTS.Common.AcceptanceCriteria
+    [INF]   Field type: Html
+    ```
+
+    A field present in the source work item type does not exist in the corresponding target work item type.
+
+    **Cause**
+
+    The target project's process template does not include a field that exists in the source. This is common when migrating between different process templates (e.g., Scrum to Agile) or when the source project has custom fields that have not been replicated to the target.
+
+    **Solutions**
+
+    **Option 1 — Add the field to the target work item type**
+
+    Add the missing field to the target project's process template. Use the Azure DevOps web UI for inherited processes or `witadmin` for XML processes. Match the field reference name exactly.
+
+    **Option 2 — Map the source field to an existing target field**
+
+    Configure `SourceFieldMappings` in `TfsWorkItemTypeValidatorTool` to tell the validator to check a different field in the target:
+
+    ```json
+    {
+      "MigrationTools": {
+        "CommonTools": {
+          "TfsWorkItemTypeValidatorTool": {
+            "Enabled": true,
+            "SourceFieldMappings": {
+              "Feature": {
+                "Microsoft.VSTS.Common.AcceptanceCriteria": "Custom.AcceptanceCriteria"
+              }
+            }
+          }
+        }
+      }
+    }
+    ```
+
+    You also need a corresponding mapping in `FieldMappingTool` so the value is actually written to the right field during migration.
+
+    **Option 3 — Exclude the field from validation**
+
+    Map the source field to an empty string to skip validation for it entirely:
+
+    ```json
+    {
+      "MigrationTools": {
+        "CommonTools": {
+          "TfsWorkItemTypeValidatorTool": {
+            "Enabled": true,
+            "SourceFieldMappings": {
+              "*": {
+                "Microsoft.VSTS.Common.CustomField1": ""
+              }
+            }
+          }
+        }
+      }
+    }
+    ```
+
+    Using `*` as the work item type key applies the exclusion to all types.
+  </Accordion>
+
+  <Accordion title="Source and target fields have different types">
+    **Symptom**
+
+    ```text
+    [WRN] Source field 'Microsoft.VSTS.Common.Help' and target field 'Microsoft.VSTS.Common.Help'
+          have different types: source = 'Boolean', target = 'String'.
+    ```
+
+    **Cause**
+
+    Both systems have a field with the same reference name, but the field type differs. This can happen when a field was redefined during a process template migration or when custom fields were recreated with a different type.
+
+    **Solutions**
+
+    - **Update the target field type** to match the source where possible (note: Azure DevOps does not allow changing field types for fields already in use — you may need to create a new field).
+    - **Use `FieldValueMap` in `FieldMappingTool`** to convert values at migration time (e.g., converting `True`/`False` boolean values to `"1"`/`"0"` strings).
+    - **Mark the field as fixed** using `FixedTargetFields` if you have a conversion already configured and want to suppress the warning:
+
+    ```json
+    {
+      "MigrationTools": {
+        "CommonTools": {
+          "TfsWorkItemTypeValidatorTool": {
+            "Enabled": true,
+            "FixedTargetFields": {
+              "*": ["Microsoft.VSTS.Common.Help"]
+            }
+          }
+        }
+      }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Source and target fields have different allowed values">
+    **Symptom**
+
+    ```text
+    [WRN] Source field 'Microsoft.VSTS.Common.BusinessValue' and target field
+          'Microsoft.VSTS.Common.BusinessValue' have different allowed values.
+    [INF]   Source allowed values: '1', '2', '3', '4', '5'
+    [INF]   Target allowed values: '1', '2', '3'
+    ```
+
+    **Cause**
+
+    The field exists in both systems but the set of allowed values differs. This is common for fields like Priority, Severity, or custom dropdown fields that have been configured differently in each project.
+
+    **Solutions**
+
+    - **Update the target field's allowed values** to include all values that appear in the source.
+    - **Configure `FieldValueMap` in `FieldMappingTool`** to translate source values to valid target values during migration.
+    - **Mark the field as fixed** with `FixedTargetFields` if you have value mapping in place and want to reduce log noise.
+  </Accordion>
+</AccordionGroup>
+
+## Scoping what gets validated
+
+By default the validator checks all work item types returned by your WIQL query. You can narrow the scope using `IncludeWorkItemtypes`:
+
+```json
+{
+  "MigrationTools": {
+    "CommonTools": {
+      "TfsWorkItemTypeValidatorTool": {
+        "Enabled": true,
+        "IncludeWorkItemtypes": [
+          "Bug", "Task", "User Story", "Product Backlog Item", "Feature", "Epic"
+        ]
+      }
+    }
+  }
+}
+```
+
+Work item types not in this list will be skipped with an informational log message (`Skipping validation of work item type '...' because it is not included in validation list`).
+
+## Wildcard field mappings
+
+Use `*` as the work item type key to apply a field mapping or fixed field declaration to all work item types at once:
+
+```json
+{
+  "MigrationTools": {
+    "CommonTools": {
+      "TfsWorkItemTypeValidatorTool": {
+        "Enabled": true,
+        "SourceFieldMappings": {
+          "*": {
+            "Microsoft.VSTS.Common.CustomField1": "",
+            "Microsoft.VSTS.Common.CustomField2": "Custom.NewField2"
+          }
+        },
+        "FixedTargetFields": {
+          "*": ["Custom.NewField2"]
+        }
+      }
+    }
+  }
+}
+```
+
+## Related pages
+
+- [ReflectedWorkItemId setup](/setup/reflected-workitem-id) — how to add the tracking field to your target project
+- [Tools reference](/reference/tools/field-mapping) — configuration reference for CommonTools

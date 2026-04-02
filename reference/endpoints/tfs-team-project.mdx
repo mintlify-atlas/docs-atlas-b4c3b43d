@@ -1,0 +1,178 @@
+---
+title: TfsTeamProjectEndpoint
+description: Full configuration reference for TfsTeamProjectEndpoint — the primary endpoint for connecting to TFS and Azure DevOps Server projects.
+---
+
+`TfsTeamProjectEndpoint` is the primary endpoint type for connecting to Team Foundation Server (TFS), Azure DevOps Server, and Azure DevOps Services. It uses the TFS Object Model client library and supports both Personal Access Token (PAT) and Windows network credential authentication.
+
+You configure one or more endpoints in the `MigrationTools.Endpoints` object. Each endpoint key (`"Source"`, `"Target"`, or any custom name) references an endpoint object with `"EndpointType": "TfsTeamProjectEndpoint"`.
+
+## Configuration example
+
+The following is drawn from `configuration-default.json`:
+
+```json
+{
+  "MigrationTools": {
+    "Version": "16.0",
+    "Endpoints": {
+      "Source": {
+        "EndpointType": "TfsTeamProjectEndpoint",
+        "Collection": "https://dev.azure.com/nkdagility-preview/",
+        "Project": "migrationSource1",
+        "Authentication": {
+          "AuthenticationMode": "AccessToken",
+          "AccessToken": "jklsadhjksahfkjsdhjksahsadjhksadhsad",
+          "NetworkCredentials": {
+            "Domain": "",
+            "Password": "",
+            "UserName": ""
+          }
+        },
+        "ReflectedWorkItemIdField": "Custom.ReflectedWorkItemId",
+        "AllowCrossProjectLinking": false,
+        "LanguageMaps": {
+          "AreaPath": "Area",
+          "IterationPath": "Iteration"
+        }
+      },
+      "Target": {
+        "EndpointType": "TfsTeamProjectEndpoint",
+        "Collection": "https://dev.azure.com/nkdagility-preview/",
+        "Project": "migrationTest55",
+        "Authentication": {
+          "AuthenticationMode": "AccessToken",
+          "AccessToken": "",
+          "NetworkCredentials": {
+            "Domain": "",
+            "Password": "",
+            "UserName": ""
+          }
+        },
+        "ReflectedWorkItemIdField": "nkdScrum.ReflectedWorkItemId",
+        "AllowCrossProjectLinking": false,
+        "LanguageMaps": {
+          "AreaPath": "Area",
+          "IterationPath": "Iteration"
+        }
+      }
+    }
+  }
+}
+```
+
+## Parameters
+
+<ParamField body="EndpointType" type="string" required>
+  Must be `"TfsTeamProjectEndpoint"`.
+</ParamField>
+
+<ParamField body="Collection" type="URI" required>
+  Full URI of the TFS collection. For Azure DevOps Services this is `"https://dev.azure.com/yourorganization/"`. For on-premises TFS it is typically `"http://tfsserver:8080/tfs/DefaultCollection"`.
+</ParamField>
+
+<ParamField body="Project" type="string" required>
+  Name of the team project within the collection to connect to.
+</ParamField>
+
+<ParamField body="Authentication" type="object" required>
+  Authentication configuration. See the [Authentication object](#authentication-object) section below.
+</ParamField>
+
+<ParamField body="ReflectedWorkItemIdField" type="string">
+  Reference name of the custom field used to store the reflected work item ID. This field is used to track which source items have already been migrated and prevents duplicates on subsequent runs. A common value is `"Custom.ReflectedWorkItemId"`.
+</ParamField>
+
+<ParamField body="AllowCrossProjectLinking" type="boolean" default="false">
+  When `true`, allows work item links to reference items in different projects within the same collection. Defaults to `false` for security and organizational clarity.
+</ParamField>
+
+<ParamField body="ProductVersion" type="string" default="OnPremises">
+  Specifies the TFS product version for compatibility purposes. Valid values:
+  - `"Cloud"` — Azure DevOps Services (`dev.azure.com`)
+  - `"OnPremises"` — Azure DevOps Server or TFS 2013+ (default)
+  - `"OnPremisesClassic"` — Legacy TFS prior to 2013 (limited support)
+
+  When omitted, defaults to `"OnPremises"`.
+</ParamField>
+
+<ParamField body="LanguageMaps" type="object">
+  Maps the localized names for Area Path and Iteration Path nodes to their English equivalents. Required when connecting to TFS installations in non-English languages. See the [LanguageMaps object](#languagemaps-object) section below.
+</ParamField>
+
+<ParamField body="Enabled" type="boolean">
+  Set to `false` to disable this endpoint without removing it from the configuration.
+</ParamField>
+
+## Authentication object
+
+The `Authentication` object is nested inside the endpoint configuration.
+
+<ParamField body="AuthenticationMode" type="string" required>
+  Authentication mode. Accepted values:
+  - `"AccessToken"` — authenticates using a Personal Access Token. Recommended for Azure DevOps Services and modern Azure DevOps Server.
+  - `"Windows"` — uses Windows integrated (NTLM) authentication via `NetworkCredentials`. Required for older on-premises TFS.
+  - `"Prompt"` — opens an interactive browser prompt. Not recommended for automated migrations.
+</ParamField>
+
+<ParamField body="AccessToken" type="string">
+  Personal Access Token (PAT) for `"AccessToken"` mode. Leave empty when using `"Windows"` mode.
+</ParamField>
+
+<ParamField body="NetworkCredentials" type="object">
+  Windows credentials used when `AuthenticationMode` is `"Windows"`. Contains `UserName`, `Password`, and `Domain` string fields.
+</ParamField>
+
+<Warning>
+  The PAT must have **full access** scopes. Scoped tokens with limited permissions commonly cause subtle migration failures that are difficult to diagnose. Store the token securely and never commit it to source control.
+</Warning>
+
+## LanguageMaps object
+
+<ParamField body="AreaPath" type="string" default="Area">
+  The localized name for the Area Path node in your TFS installation. English installations use `"Area"`.
+</ParamField>
+
+<ParamField body="IterationPath" type="string" default="Iteration">
+  The localized name for the Iteration Path node. English installations use `"Iteration"`.
+</ParamField>
+
+## PAT requirements
+
+When using `"AuthenticationMode": "AccessToken"`:
+
+- Create the PAT in the Azure DevOps organization you are connecting to.
+- Grant **full access** (all scopes). Restricted scopes are not sufficient for all migration operations.
+- The account associated with the PAT must have **Project Collection Administrator** rights on the source, and at minimum **Project Administrator** rights on the target project.
+- PATs expire. If a migration fails after a period of inactivity, check whether the token has expired.
+
+<Note>
+  The `ReflectedWorkItemIdField` must exist as a custom field on the target project's work item types before running a migration. See [Setting up ReflectedWorkItemId](/setup/reflected-workitem-id) for instructions.
+</Note>
+
+## Classic format
+
+Older versions of the tools used a `$type` property instead of `EndpointType`. The classic format is still accepted for backward compatibility:
+
+```json
+{
+  "$type": "TfsTeamProjectEndpointOptions",
+  "Collection": "https://dev.azure.com/nkdagility-preview/",
+  "Project": "migrationSource1",
+  "Authentication": {
+    "AuthenticationMode": "AccessToken",
+    "NetworkCredentials": {
+      "Domain": "",
+      "UserName": "",
+      "Password": "** removed as a secret ***"
+    },
+    "AccessToken": "** removed as a secret ***"
+  },
+  "ReflectedWorkItemIdField": "Custom.ReflectedWorkItemId",
+  "LanguageMaps": {
+    "AreaPath": "Area",
+    "IterationPath": "Iteration"
+  },
+  "ProductVersion": "OnPremises"
+}
+```

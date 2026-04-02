@@ -1,0 +1,103 @@
+---
+title: AzureDevOpsEndpoint
+description: Configuration reference for AzureDevOpsEndpoint — the REST API endpoint for connecting to Azure DevOps organizations.
+---
+
+`AzureDevOpsEndpoint` connects to Azure DevOps organizations using the Azure DevOps REST API. Unlike `TfsTeamProjectEndpoint`, which uses the TFS Object Model client library, this endpoint uses HTTP clients and is used primarily for pipeline-related operations and REST-based migration scenarios.
+
+<Info>
+  For most work item migration scenarios, use [`TfsTeamProjectEndpoint`](/reference/endpoints/tfs-team-project) instead. `AzureDevOpsEndpoint` is designed for REST API operations such as pipeline migration.
+</Info>
+
+## How it differs from TfsTeamProjectEndpoint
+
+| | `AzureDevOpsEndpoint` | `TfsTeamProjectEndpoint` |
+|---|---|---|
+| Protocol | Azure DevOps REST API (HTTP) | TFS Object Model (SOAP/native client) |
+| Primary use | Pipeline processors, REST-based scenarios | Work item migration, test plans, node structure |
+| Authentication | `AccessToken` only | `AccessToken` or Windows credentials |
+| Collection URI field | `Organisation` | `Collection` |
+| LanguageMaps | Not supported | Supported |
+
+## Configuration example
+
+```json
+{
+  "MigrationTools": {
+    "Version": "16.0",
+    "Endpoints": {
+      "Source": {
+        "EndpointType": "AzureDevOpsEndpoint",
+        "AuthenticationMode": "AccessToken",
+        "AccessToken": "jklsadhjksahfkjsdhjksahsadjhksadhsad",
+        "Organisation": "https://dev.azure.com/xxx/",
+        "Project": "myProject",
+        "ReflectedWorkItemIdField": "Custom.ReflectedWorkItemId"
+      }
+    }
+  }
+}
+```
+
+## Parameters
+
+<ParamField body="EndpointType" type="string" required>
+  Must be `"AzureDevOpsEndpoint"`.
+</ParamField>
+
+<ParamField body="Organisation" type="string" required>
+  Full URL of the Azure DevOps organization. Must include the trailing slash, e.g., `"https://dev.azure.com/myorganization/"`.
+</ParamField>
+
+<ParamField body="Project" type="string" required>
+  Name of the Azure DevOps project within the organization.
+</ParamField>
+
+<ParamField body="AuthenticationMode" type="string" required>
+  Authentication mode. Only `"AccessToken"` is supported for this endpoint type.
+</ParamField>
+
+<ParamField body="AccessToken" type="string" required>
+  Personal Access Token (PAT) for the Azure DevOps organization. Required for all API operations.
+</ParamField>
+
+<ParamField body="ReflectedWorkItemIdField" type="string" required>
+  Reference name of the custom field used to track migrated items and prevent duplicates. Typically `"Custom.ReflectedWorkItemId"`.
+</ParamField>
+
+<ParamField body="Enabled" type="boolean">
+  Set to `false` to disable this endpoint without removing it from the configuration.
+</ParamField>
+
+## PAT requirements
+
+The Personal Access Token must have scopes appropriate for the operations you intend to perform:
+
+- **Pipeline migration**: requires `Build (Read & Execute)`, `Release (Read, write, & execute)`, and `Agent Pools (Read & manage)` at minimum.
+- **Full access**: grant full access if unsure, to avoid permission-related failures.
+
+<Warning>
+  Always use a dedicated service account PAT rather than a personal user PAT. Personal PATs expire and are tied to individual user accounts, which can disrupt automated migration runs.
+</Warning>
+
+## Behaviour
+
+- **Connection pooling**: maintains efficient HTTP connections to minimize overhead during bulk operations.
+- **Rate limiting**: automatically handles Azure DevOps API rate limits to prevent throttling.
+- **Error handling**: includes retry logic for transient failures.
+- **Reflected work item tracking**: uses the `ReflectedWorkItemIdField` to identify already-migrated items.
+
+## Classic format
+
+Older configurations use `$type` instead of `EndpointType`:
+
+```json
+{
+  "$type": "AzureDevOpsEndpointOptions",
+  "AuthenticationMode": "AccessToken",
+  "AccessToken": "jklsadhjksahfkjsdhjksahsadjhksadhsad",
+  "Organisation": "https://dev.azure.com/xxx/",
+  "Project": "myProject",
+  "ReflectedWorkItemIdField": "Custom.ReflectedWorkItemId"
+}
+```

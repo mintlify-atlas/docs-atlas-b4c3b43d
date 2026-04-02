@@ -1,28 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "name": "Azure DevOps Migration Tools",
+  "projectType": "cli-tool",
+  "projectName": "Azure DevOps Migration Tools",
+  "projectDescription": "A Windows CLI tool that migrates and bulk-edits Work Items, Test Plans, Pipelines, and Teams between TFS and Azure DevOps projects, collections, and organizations.",
   "theme": "aspen",
-  "colors": {
-    "primary": "#62137a",
-    "light": "#ac84b4",
-    "dark": "#dbcee0"
-  },
-  "favicon": "https://media.brand.dev/c12fe18a-2559-4adb-9070-0147fc44921f.svg",
-  "logo": {
-    "light": "https://media.brand.dev/bd7129fb-4804-486f-92bc-0a5ca8d78b85.png",
-    "dark": "https://media.brand.dev/bd7129fb-4804-486f-92bc-0a5ca8d78b85.png"
-  },
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/nkdAgility/azure-devops-migration-tools"
-    }
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/nkdAgility/azure-devops-migration-tools"
-    }
-  },
+  "primaryColor": "#62137a",
+  "lightColor": "#ac84b4",
+  "darkColor": "#dbcee0",
   "navigation": {
     "tabs": [
       {
@@ -108,5 +91,40 @@
         ]
       }
     ]
-  }
+  },
+  "keyFeatures": [
+    "Migrate Work Items (with full history, attachments, and links) between TFS and Azure DevOps",
+    "Migrate Test Plans, Test Suites, Shared Steps, and Test Configurations",
+    "Copy Pipelines between Azure DevOps projects and organizations",
+    "Bulk edit Work Items in-place for process template changes or data cleanup",
+    "Flexible field mapping system with regex, value, merge, and calculation maps",
+    "Node structure (Area/Iteration) remapping with regex-based path transformations",
+    "User identity mapping between source and target organizations",
+    "Team settings migration including capacities and sprint assignments",
+    "WIQL-based work item filtering for selective migrations",
+    "Installation via Winget, Chocolatey, or manual ZIP download"
+  ],
+  "publicApiSurface": [
+    "devopsmigration init --options <Basic|Full|WorkItemTracking|Fullv2|WorkItemTrackingv2>",
+    "devopsmigration execute --config <configuration.json>",
+    "TfsWorkItemMigrationProcessor",
+    "TfsTestPlansAndSuitesMigrationProcessor",
+    "TfsWorkItemBulkEditProcessor",
+    "AzureDevOpsPipelineProcessor",
+    "TfsExportUsersForMappingProcessor",
+    "TfsTeamSettingsProcessor",
+    "TfsSharedQueryProcessor",
+    "ProcessDefinitionProcessor",
+    "FieldMappingTool",
+    "TfsNodeStructureTool",
+    "TfsUserMappingTool",
+    "TfsRevisionManagerTool",
+    "TfsTeamSettingsTool",
+    "TfsAttachmentTool",
+    "WorkItemTypeMappingTool",
+    "TfsGitRepositoryTool",
+    "StringManipulatorTool",
+    "TfsTeamProjectEndpoint",
+    "AzureDevOpsEndpoint"
+  ]
 }

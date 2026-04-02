@@ -1,0 +1,287 @@
+---
+title: Bulk edit work items in place
+description: How to use TfsWorkItemBulkEditProcessor and TfsWorkItemOverwriteProcessor to update work items in a single project without migrating them between projects.
+---
+
+Bulk edit is different from migration. Instead of copying work items from one project to another, bulk edit loads work items from a target project and updates them in place. You use the same source and target endpoint, pointing at the same project.
+
+The two processors that support this pattern are:
+
+- **`TfsWorkItemBulkEditProcessor`** — the primary processor for making bulk changes. Loads work items from the target and updates them according to configured field maps and tools.
+- **`TfsWorkItemOverwriteProcessor`** — reapplies field mappings to already-migrated work items. Does not create new work items; only updates fields on existing items.
+
+## When to use bulk edit
+
+<CardGroup cols={2}>
+  <Card title="Process template changes" icon="file-edit">
+    After changing your process template (adding fields, renaming states), use bulk edit to populate new fields or remap values on existing work items.
+  </Card>
+  <Card title="Field cleanup" icon="eraser">
+    Correct data quality issues: strip invalid characters, truncate oversized field values, or normalize inconsistent text.
+  </Card>
+  <Card title="Tag normalization" icon="tag">
+    Rename or consolidate tags across large numbers of work items using field maps and string manipulators.
+  </Card>
+  <Card title="Reapply mappings after migration" icon="rotate-ccw">
+    If field maps were misconfigured during an initial migration, use `TfsWorkItemOverwriteProcessor` to reapply corrected mappings without re-migrating.
+  </Card>
+</CardGroup>
+
+---
+
+## TfsWorkItemBulkEditProcessor
+
+This processor loads work items from the target project based on a WIQL query and applies the changes defined in `CommonTools` (field maps, string manipulators, etc.). Because you are editing in place, both `Source` and `Target` endpoints point at the same project.
+
+### Configuration example
+
+```json
+{
+  "Serilog": {
+    "MinimumLevel": "Information"
+  },
+  "MigrationTools": {
+    "Version": "16.0",
+    "Endpoints": {
+      "Source": {
+        "EndpointType": "TfsTeamProjectEndpoint",
+        "Collection": "https://dev.azure.com/your-org/",
+        "Project": "YourProject",
+        "Authentication": {
+          "AuthenticationMode": "AccessToken",
+          "AccessToken": "YOUR_PAT"
+        }
+      },
+      "Target": {
+        "EndpointType": "TfsTeamProjectEndpoint",
+        "Collection": "https://dev.azure.com/your-org/",
+        "Project": "YourProject",
+        "Authentication": {
+          "AuthenticationMode": "AccessToken",
+          "AccessToken": "YOUR_PAT"
+        },
+        "ReflectedWorkItemIdField": "Custom.ReflectedWorkItemId"
+      }
+    },
+    "CommonTools": {
+      "FieldMappingTool": {
+        "Enabled": true,
+        "FieldMaps": [
+          {
+            "FieldMapType": "FieldToFieldMap",
+            "ApplyTo": ["User Story"],
+            "sourceField": "System.Description",
+            "targetField": "System.Description"
+          }
+        ]
+      },
+      "StringManipulatorTool": {
+        "Enabled": true,
+        "MaxStringLength": 1000000,
+        "Manipulators": [
+          {
+            "$type": "RegexStringManipulator",
+            "Enabled": true,
+            "Pattern": "[^( -~)\n\r\t]+",
+            "Replacement": "",
+            "Description": "Remove invalid characters from string fields"
+          }
+        ]
+      }
+    },
+    "Processors": [
+      {
+        "ProcessorType": "TfsWorkItemBulkEditProcessor",
+        "Enabled": true,
+        "WIQLQuery": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject AND [System.WorkItemType] NOT IN ('Test Suite', 'Test Plan','Shared Steps','Shared Parameter','Feedback Request') ORDER BY [System.ChangedDate] desc",
+        "SourceName": "Source",
+        "TargetName": "Target"
+      }
+    ]
+  }
+}
+```
+
+---
+
+## TfsWorkItemOverwriteProcessor
+
+`TfsWorkItemOverwriteProcessor` is designed for post-migration correction. It does not create new work items — it only updates fields on work items that already exist in the target. Use this when a migration has already completed but field maps need to be corrected or reapplied.
+
+Like `TfsWorkItemBulkEditProcessor`, both endpoints point at the project you want to update.
+
+### Configuration example
+
+```json
+{
+  "Serilog": {
+    "MinimumLevel": "Information"
+  },
+  "MigrationTools": {
+    "Version": "16.0",
+    "Endpoints": {
+      "Source": {
+        "EndpointType": "TfsTeamProjectEndpoint",
+        "Collection": "https://dev.azure.com/your-org/",
+        "Project": "YourProject",
+        "Authentication": {
+          "AuthenticationMode": "AccessToken",
+          "AccessToken": "YOUR_PAT"
+        }
+      },
+      "Target": {
+        "EndpointType": "TfsTeamProjectEndpoint",
+        "Collection": "https://dev.azure.com/your-org/",
+        "Project": "YourProject",
+        "Authentication": {
+          "AuthenticationMode": "AccessToken",
+          "AccessToken": "YOUR_PAT"
+        },
+        "ReflectedWorkItemIdField": "Custom.ReflectedWorkItemId"
+      }
+    },
+    "CommonTools": {
+      "FieldMappingTool": {
+        "Enabled": true,
+        "FieldMaps": [
+          {
+            "FieldMapType": "FieldValueMap",
+            "ApplyTo": ["*"],
+            "sourceField": "System.State",
+            "targetField": "System.State",
+            "defaultValue": "New",
+            "valueMapping": {
+              "Approved": "New",
+              "Committed": "Active",
+              "Done": "Closed"
+            }
+          }
+        ]
+      }
+    },
+    "Processors": [
+      {
+        "ProcessorType": "TfsWorkItemOverwriteProcessor",
+        "Enabled": true,
+        "WIQLQuery": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject ORDER BY [System.ChangedDate] desc",
+        "SourceName": "Source",
+        "TargetName": "Target"
+      }
+    ]
+  }
+}
+```
+
+---
+
+## Common use cases with examples
+
+### Remove invalid characters from all string fields
+
+Use `StringManipulatorTool` to strip characters outside the printable ASCII range. This is useful after importing data from legacy systems or when work items contain characters that Azure DevOps rejects.
+
+```json
+"CommonTools": {
+  "StringManipulatorTool": {
+    "Enabled": true,
+    "MaxStringLength": 1000000,
+    "Manipulators": [
+      {
+        "$type": "RegexStringManipulator",
+        "Enabled": true,
+        "Pattern": "[^( -~)\n\r\t]+",
+        "Replacement": "",
+        "Description": "Remove invalid characters from the end of the string"
+      }
+    ]
+  }
+}
+```
+
+### Remap state values after a process template change
+
+If you changed state names in your process template, use a `FieldValueMap` to normalize existing work items:
+
+```json
+"CommonTools": {
+  "FieldMappingTool": {
+    "Enabled": true,
+    "FieldMaps": [
+      {
+        "FieldMapType": "FieldValueMap",
+        "ApplyTo": ["*"],
+        "sourceField": "System.State",
+        "targetField": "System.State",
+        "defaultValue": "New",
+        "valueMapping": {
+          "Approved": "New",
+          "New": "New",
+          "Committed": "Active",
+          "In Progress": "Active",
+          "To Do": "New",
+          "Done": "Closed",
+          "Removed": "Removed"
+        }
+      }
+    ]
+  }
+}
+```
+
+### Copy a field value to a different field
+
+Move a value from one field to another — for example, after renaming a custom field in your process template:
+
+```json
+"CommonTools": {
+  "FieldMappingTool": {
+    "Enabled": true,
+    "FieldMaps": [
+      {
+        "FieldMapType": "FieldToFieldMap",
+        "ApplyTo": ["User Story", "Bug"],
+        "sourceField": "Custom.OldFieldName",
+        "targetField": "Custom.NewFieldName"
+      }
+    ]
+  }
+}
+```
+
+### Convert a field value to a tag
+
+Turn a field value (like a priority or status) into a tag for filtering:
+
+```json
+"CommonTools": {
+  "FieldMappingTool": {
+    "Enabled": true,
+    "FieldMaps": [
+      {
+        "FieldMapType": "FieldToTagMap",
+        "ApplyTo": ["*"],
+        "sourceField": "Microsoft.VSTS.CMMI.Blocked",
+        "pattern": "Yes",
+        "formatExpression": "{0}"
+      }
+    ]
+  }
+}
+```
+
+---
+
+## Tips and warnings
+
+<Warning>
+Bulk edit modifies work items **in the project you point it at**. There is no undo. Always test your configuration against a small, scoped WIQL query (e.g., `WHERE [System.Id] IN (123, 456)`) before running against the full project.
+</Warning>
+
+<Tip>
+Set `"MinimumLevel": "Debug"` in the `Serilog` section to see which work items are being processed and what field values are being applied. This makes it much easier to verify your field maps are working correctly before committing to a full run.
+</Tip>
+
+- Scope your WIQL query tightly. If you only want to update work items of a specific type or in a specific area, add those conditions to the query.
+- The `StringManipulatorTool` runs on all string fields, not just the ones in your `FieldMaps`. If you only want it applied to specific fields, disable it and use regex-based field maps instead.
+- `TfsWorkItemOverwriteProcessor` is appropriate when work items have already been migrated and you need to correct field values without re-running the full migration.
+- Use `TfsWorkItemBulkEditProcessor` when you want to make changes to work items that have never been through a migration, or when you need to apply updates broadly to a live project.

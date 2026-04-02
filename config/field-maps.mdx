@@ -1,0 +1,427 @@
+---
+title: "Field maps"
+description: "Configure field mapping rules in Azure DevOps Migration Tools — all available FieldMapType values, the ApplyTo/sourceField/targetField pattern, and real configuration examples."
+---
+
+Field maps are rules that control how field values are transformed when work items are migrated from source to target. They are defined inside `CommonTools.FieldMappingTool.FieldMaps` and processed in array order for every work item that matches the `ApplyTo` criteria.
+
+## How field maps work
+
+Every field map shares a common structure:
+
+```json
+{
+  "FieldMapType": "FieldToFieldMap",
+  "ApplyTo": [ "User Story", "Bug" ],
+  "sourceField": "System.AcceptanceCriteria",
+  "targetField": "System.Description"
+}
+```
+
+<ParamField body="FieldMapType" type="string" required>
+  Identifies which mapping strategy to use. Must be one of the type names listed in this page.
+</ParamField>
+
+<ParamField body="ApplyTo" type="string[]" required>
+  List of work item type names this map applies to. Use `["*"]` to apply to all work item types. Use specific names such as `["Bug", "User Story"]` to limit scope.
+</ParamField>
+
+<ParamField body="sourceField" type="string">
+  The reference name of the field to read from the source work item (e.g. `"System.AcceptanceCriteria"`). Not used by all map types — `FieldLiteralMap`, `FieldClearMap`, and `FieldSkipMap` operate on target fields only.
+</ParamField>
+
+<ParamField body="targetField" type="string">
+  The reference name of the field to write on the target work item (e.g. `"System.Description"`).
+</ParamField>
+
+<Note>
+  Always use field reference names (e.g. `System.Title`), not display names (e.g. `Title`). You can look up reference names in the Azure DevOps process template editor or via the REST API.
+</Note>
+
+## Real example from configuration-default.json
+
+The following is the `FieldMappingTool` configuration as shipped in `configuration-default.json`:
+
+```json
+"FieldMappingTool": {
+  "Enabled": true,
+  "FieldMaps": [
+    {
+      "FieldMapType": "FieldtoFieldMap",
+      "ApplyTo": [ "SomeWorkItemType" ],
+      "sourceField": "System.AcceptanceCriteria",
+      "targetField": "System.AcceptanceCriteria2"
+    },
+    {
+      "FieldMapType": "FieldtoFieldMap",
+      "ApplyTo": [ "SomeWorkItemType" ],
+      "sourceField": "System.Description",
+      "targetField": "System.Description2"
+    }
+  ]
+}
+```
+
+## Available map types
+
+<Columns cols={2}>
+  <Card title="FieldToFieldMap" icon="arrow-right">
+    Copies a value from one source field to one target field. The most commonly used map type. Supports an optional `defaultValue` when the source is null or empty.
+  </Card>
+  <Card title="FieldToFieldMultiMap" icon="arrows-split-up-and-left">
+    Copies multiple source-to-target field pairs in a single configuration block using a `SourceToTargetMappings` dictionary. More compact than defining individual `FieldToFieldMap` entries.
+  </Card>
+  <Card title="FieldValueMap" icon="list">
+    Translates specific source values to target values using a lookup table (`valueMapping`). Essential for mapping workflow states, priorities, or categories between different process templates.
+  </Card>
+  <Card title="FieldLiteralMap" icon="pen-line">
+    Sets a static constant value on a target field for all matching work items, regardless of the source value. Use to apply organisation-wide defaults or batch-tag migrated items.
+  </Card>
+  <Card title="FieldMergeMap" icon="merge">
+    Combines values from multiple source fields into a single target field using a .NET format expression (`{0}`, `{1}`, etc.). Useful for consolidating related fields that need to be combined in the target.
+  </Card>
+  <Card title="FieldClearMap" icon="trash">
+    Sets a target field to null. Includes validation to avoid clearing required or non-editable fields. Use for data sanitisation or removing fields that are not valid in the target system.
+  </Card>
+  <Card title="FieldSkipMap" icon="ban">
+    Restores a target field to its original value, effectively preventing the migration from modifying it. Protects specific fields from being overwritten during migration.
+  </Card>
+  <Card title="RegexFieldMap" icon="code">
+    Applies a .NET regular expression pattern and replacement to a source field value, writing the result to a target field. Only processes items where the pattern matches. Supports capture groups.
+  </Card>
+  <Card title="FieldToTagFieldMap" icon="tag">
+    Converts a source field value into a work item tag. Supports an optional `formatExpression` to prefix or label the tag. Null or empty source values produce no tag.
+  </Card>
+  <Card title="TreeToTagFieldMap" icon="tree">
+    Converts an Area Path or Iteration Path hierarchy into tags. `toSkip` controls how many leading path levels to omit. `timeTravel` reads the historical path value from a specified number of revisions ago.
+  </Card>
+  <Card title="MultiValueConditionalMap" icon="filter">
+    Applies conditional logic across multiple source fields to determine a target value. Evaluates a list of conditions in order and uses the value of the first matching condition.
+  </Card>
+  <Card title="FieldCalculationMap" icon="calculator">
+    Performs mathematical calculations on numeric source fields using NCalc expressions and writes the result to a target field. Parameters map named expression variables to field reference names.
+  </Card>
+</Columns>
+
+## Map type reference
+
+### FieldToFieldMap
+
+Direct one-to-one copy. The most fundamental map type.
+
+```json
+{
+  "FieldMapType": "FieldToFieldMap",
+  "ApplyTo": [ "User Story" ],
+  "sourceField": "Microsoft.VSTS.Scheduling.StoryPoints",
+  "targetField": "Microsoft.VSTS.Scheduling.Effort",
+  "defaultValue": "0"
+}
+```
+
+<ParamField body="defaultValue" type="string">
+  Value to use when the source field is null or empty. Optional.
+</ParamField>
+
+---
+
+### FieldToFieldMultiMap
+
+Map multiple field pairs in one block using `SourceToTargetMappings`.
+
+```json
+{
+  "FieldMapType": "FieldToFieldMultiMap",
+  "ApplyTo": [ "*" ],
+  "SourceToTargetMappings": {
+    "SourceField1": "TargetField1",
+    "SourceField2": "TargetField2"
+  }
+}
+```
+
+<ParamField body="SourceToTargetMappings" type="object" required>
+  Dictionary of source field reference names to target field reference names.
+</ParamField>
+
+---
+
+### FieldValueMap
+
+Translate specific values using a lookup table. From `configuration-classic.json`:
+
+```json
+{
+  "FieldMapType": "FieldValueMap",
+  "ApplyTo": [ "*" ],
+  "sourceField": "System.State",
+  "targetField": "System.State",
+  "defaultValue": "New",
+  "valueMapping": {
+    "Approved": "New",
+    "New": "New",
+    "Committed": "Active",
+    "In Progress": "Active",
+    "To Do": "New",
+    "Done": "Closed",
+    "Removed": "Removed"
+  }
+}
+```
+
+<ParamField body="valueMapping" type="object" required>
+  Dictionary of source values to target values. Case-sensitive. Values not present in the mapping fall back to `defaultValue`.
+</ParamField>
+
+<ParamField body="defaultValue" type="string">
+  Value to use when no mapping entry matches the source value.
+</ParamField>
+
+---
+
+### FieldLiteralMap
+
+Set a static value on all matching work items.
+
+```json
+{
+  "FieldMapType": "FieldLiteralMap",
+  "ApplyTo": [ "*" ],
+  "value": "Migrated-2024",
+  "targetField": "System.Tags"
+}
+```
+
+<ParamField body="value" type="string" required>
+  The literal string to assign to `targetField` on every matching work item.
+</ParamField>
+
+---
+
+### FieldMergeMap
+
+Combine multiple source fields into one target field. From `configuration-classic.json`:
+
+```json
+{
+  "FieldMapType": "FieldMergeMap",
+  "ApplyTo": [ "*" ],
+  "sourceFields": [
+    "System.Description",
+    "Microsoft.VSTS.Common.AcceptanceCriteria"
+  ],
+  "targetField": "System.Description",
+  "formatExpression": "{0} <br/><br/><h3>Acceptance Criteria</h3>{1}"
+}
+```
+
+<ParamField body="sourceFields" type="string[]" required>
+  Ordered list of source field reference names. Position in the array corresponds to placeholder index in `formatExpression` (`{0}`, `{1}`, etc.).
+</ParamField>
+
+<ParamField body="formatExpression" type="string" required>
+  .NET composite format string. Use `{0}` for the first source field value, `{1}` for the second, and so on. Null source values are substituted with an empty string.
+</ParamField>
+
+---
+
+### FieldClearMap
+
+Remove a field value by setting it to null.
+
+```json
+{
+  "FieldMapType": "FieldClearMap",
+  "ApplyTo": [ "*" ],
+  "targetField": "Custom.InternalNotes"
+}
+```
+
+The tool validates that the field is editable and not required before clearing. Required fields and read-only fields are silently skipped.
+
+---
+
+### FieldSkipMap
+
+Protect a target field from being overwritten during migration.
+
+```json
+{
+  "FieldMapType": "FieldSkipMap",
+  "ApplyTo": [ "*" ],
+  "targetField": "TfsMigrationTool.ReflectedWorkItemId"
+}
+```
+
+The map restores the field's original value after other maps have run, effectively preventing any change. From `configuration-classic.json`:
+
+```json
+{
+  "FieldMapType": "FieldSkipMap",
+  "ApplyTo": [ "*" ],
+  "targetField": "TfsMigrationTool.ReflectedWorkItemId"
+}
+```
+
+---
+
+### RegexFieldMap
+
+Transform a field value using a regular expression. From `configuration-classic.json`:
+
+```json
+{
+  "FieldMapType": "RegexFieldMap",
+  "ApplyTo": [ "*" ],
+  "sourceField": "COMPANY.PRODUCT.Release",
+  "targetField": "COMPANY.DEVISION.MinorReleaseVersion",
+  "pattern": "PRODUCT \\d{4}.(\\d{1})",
+  "replacement": "$1"
+}
+```
+
+<ParamField body="pattern" type="string" required>
+  .NET regular expression pattern. The map only runs if this pattern matches the source value. Use capturing groups (`()`) to extract portions for use in `replacement`.
+</ParamField>
+
+<ParamField body="replacement" type="string" required>
+  Replacement string. Use `$1`, `$2`, etc. to reference captured groups. Use `""` to delete matched content. Non-matching values are left unchanged.
+</ParamField>
+
+---
+
+### FieldToTagFieldMap
+
+Convert a field value into a work item tag. From `configuration-classic.json`:
+
+```json
+{
+  "FieldMapType": "FieldToTagFieldMap",
+  "ApplyTo": [ "*" ],
+  "sourceField": "System.State",
+  "formatExpression": "ScrumState:{0}"
+}
+```
+
+<ParamField body="formatExpression" type="string">
+  Optional .NET format string for the tag value. `{0}` is replaced by the source field value. If omitted, the raw field value is used as the tag. Null or empty source values produce no tag.
+</ParamField>
+
+---
+
+### TreeToTagFieldMap
+
+Convert area or iteration path hierarchy into tags. From `configuration-classic.json`:
+
+```json
+{
+  "FieldMapType": "TreeToTagFieldMap",
+  "ApplyTo": [ "*" ],
+  "toSkip": 3,
+  "timeTravel": 1
+}
+```
+
+<ParamField body="toSkip" type="number" default="0">
+  Number of leading path levels to skip when generating tags. For example, with `toSkip: 1`, the root project level is omitted. Use this to avoid redundant top-level path segments in tags.
+</ParamField>
+
+<ParamField body="timeTravel" type="number" default="0">
+  Read the area/iteration path from this many revisions before the current one. Use `0` for the current revision value. Use a positive integer to capture a historical path value — useful when paths have changed and you want to tag items with their original path.
+</ParamField>
+
+---
+
+### MultiValueConditionalMap
+
+Apply conditional logic based on multiple source fields. From `configuration-classic.json`:
+
+```json
+{
+  "FieldMapType": "MultiValueConditionalMap",
+  "ApplyTo": [ "*" ],
+  "sourceFieldsAndValues": {
+    "Field1": "Value1",
+    "Field2": "Value2"
+  },
+  "targetFieldsAndValues": {
+    "Field1": "Value1",
+    "Field2": "Value2"
+  }
+}
+```
+
+<ParamField body="sourceFieldsAndValues" type="object" required>
+  Dictionary of source field names to expected values. All conditions must be true (AND logic) for the map to apply.
+</ParamField>
+
+<ParamField body="targetFieldsAndValues" type="object" required>
+  Dictionary of target field names to values to set when the source conditions are met.
+</ParamField>
+
+---
+
+### FieldCalculationMap
+
+Compute a numeric value from source fields using an NCalc expression.
+
+```json
+{
+  "FieldMapType": "FieldCalculationMap",
+  "ApplyTo": [ "Bug", "Task" ],
+  "expression": "[effort] * [rate]",
+  "parameters": {
+    "effort": "Custom.EstimatedHours",
+    "rate": "Custom.HourlyRate"
+  },
+  "targetField": "Custom.EstimatedCost"
+}
+```
+
+<ParamField body="expression" type="string" required>
+  NCalc expression string. Reference source field values via named parameters enclosed in square brackets (e.g. `[effort]`). Supports arithmetic (`+`, `-`, `*`, `/`), comparison operators, and functions (`Abs`, `Round`, `Pow`, `Min`, `Max`, `Sqrt`, `if`).
+</ParamField>
+
+<ParamField body="parameters" type="object" required>
+  Maps parameter names used in the expression to source field reference names. All referenced fields must contain numeric values.
+</ParamField>
+
+---
+
+## Combining multiple maps
+
+Field maps are applied in array order. You can chain maps to build up complex transformations:
+
+```json
+"FieldMaps": [
+  {
+    "FieldMapType": "FieldValueMap",
+    "ApplyTo": [ "*" ],
+    "sourceField": "System.State",
+    "targetField": "System.State",
+    "defaultValue": "New",
+    "valueMapping": {
+      "Approved": "New",
+      "Committed": "Active",
+      "Done": "Closed"
+    }
+  },
+  {
+    "FieldMapType": "FieldToTagFieldMap",
+    "ApplyTo": [ "*" ],
+    "sourceField": "System.State",
+    "formatExpression": "ScrumState:{0}"
+  },
+  {
+    "FieldMapType": "FieldToFieldMap",
+    "ApplyTo": [ "User Story" ],
+    "sourceField": "Microsoft.VSTS.Scheduling.StoryPoints",
+    "targetField": "Microsoft.VSTS.Scheduling.Effort",
+    "defaultValue": "0"
+  }
+]
+```
+
+<Warning>
+  Maps that modify the same field interact with each other. A `FieldValueMap` that sets `System.State` followed by a `FieldSkipMap` on `System.State` would undo the value map's changes. Review the order of maps carefully when the same field is targeted by multiple rules.
+</Warning>

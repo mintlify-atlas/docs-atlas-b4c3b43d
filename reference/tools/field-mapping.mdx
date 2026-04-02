@@ -1,0 +1,378 @@
+---
+title: FieldMappingTool
+description: Transform field values during work item migration using direct copies, value lookups, regex patterns, calculations, and more.
+---
+
+The `FieldMappingTool` applies field transformation rules to work items as they are processed during migration. Use it whenever the source and target projects use different field names, different state values, or need computed fields derived from source data.
+
+The tool is configured in the `CommonTools` section of your `configuration.json` and is invoked automatically by migration processors such as `TfsWorkItemMigrationProcessor` and `TfsWorkItemOverwriteProcessor`.
+
+<Note>
+Field maps are applied in two passes: universal maps (`ApplyTo: ["*"]`) run first, then type-specific maps. Within each pass, maps execute in the order they appear in the `FieldMaps` array.
+</Note>
+
+## Configuration
+
+Place the `FieldMappingTool` block inside `MigrationTools.CommonTools`:
+
+```json configuration.json
+{
+  "MigrationTools": {
+    "Version": "16.0",
+    "CommonTools": {
+      "FieldMappingTool": {
+        "Enabled": true,
+        "FieldMaps": [
+          {
+            "FieldMapType": "FieldtoFieldMap",
+            "ApplyTo": ["SomeWorkItemType"],
+            "sourceField": "System.AcceptanceCriteria",
+            "targetField": "System.AcceptanceCriteria2"
+          },
+          {
+            "FieldMapType": "FieldtoFieldMap",
+            "ApplyTo": ["SomeWorkItemType"],
+            "sourceField": "System.Description",
+            "targetField": "System.Description2"
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+## Options
+
+<ParamField body="Enabled" type="boolean" default="false">
+  Set to `true` to activate the tool. When `false`, no field mappings are applied during migration.
+</ParamField>
+
+<ParamField body="FieldMaps" type="object[]">
+  Array of field map definitions. Each entry must include `FieldMapType` and `ApplyTo`, plus the properties specific to the chosen map type.
+
+  <ParamField body="FieldMaps[].FieldMapType" type="string" required>
+    Selects the transformation strategy. See [Field map types](#field-map-types) below.
+  </ParamField>
+
+  <ParamField body="FieldMaps[].ApplyTo" type="string[]" required>
+    Work item type names this map targets. Use `["*"]` for all types, or list specific names such as `["Bug", "Task"]`. If omitted, the value from `FieldMapDefaults.ApplyTo` is used.
+  </ParamField>
+</ParamField>
+
+## Field map types
+
+Each `FieldMapType` value activates a different transformation strategy. The properties required in the map object vary by type.
+
+<AccordionGroup>
+
+<Accordion title="FieldToFieldMap — copy one field to another">
+  Copies the value from `sourceField` to `targetField`. Use `defaultValue` when the source is empty.
+
+  ```json json
+  {
+    "FieldMapType": "FieldToFieldMap",
+    "ApplyTo": ["SomeWorkItemType"],
+    "sourceField": "Microsoft.VSTS.Common.BacklogPriority",
+    "targetField": "Microsoft.VSTS.Common.StackRank",
+    "defaultValue": "42"
+  }
+  ```
+
+  | Property | Required | Description |
+  |---|---|---|
+  | `sourceField` | Yes | Reference name of the source field |
+  | `targetField` | Yes | Reference name of the target field |
+  | `defaultValue` | No | Value to write when `sourceField` is empty |
+</Accordion>
+
+<Accordion title="FieldToFieldMultiMap — copy multiple fields at once">
+  Maps several source fields to target fields in a single entry.
+
+  ```json json
+  {
+    "FieldMapType": "FieldToFieldMultiMap",
+    "ApplyTo": ["SomeWorkItemType", "SomeOtherWorkItemType"],
+    "SourceToTargetMappings": {
+      "SourceField1": "TargetField1",
+      "SourceField2": "TargetField2"
+    }
+  }
+  ```
+
+  | Property | Required | Description |
+  |---|---|---|
+  | `SourceToTargetMappings` | Yes | Object mapping source field names to target field names |
+</Accordion>
+
+<Accordion title="FieldValueMap — translate field values via a lookup table">
+  Converts discrete values in `sourceField` to different values in `targetField`. Use this to translate state names, priority levels, or any enumerated values.
+
+  ```json json
+  {
+    "FieldMapType": "FieldValueMap",
+    "ApplyTo": ["SomeWorkItemType"],
+    "sourceField": "System.State",
+    "targetField": "System.State",
+    "defaultValue": "New",
+    "valueMapping": {
+      "Active": "InProgress",
+      "Closed": "Done",
+      "Resolved": "InProgress"
+    }
+  }
+  ```
+
+  | Property | Required | Description |
+  |---|---|---|
+  | `sourceField` | Yes | Field to read the original value from |
+  | `targetField` | Yes | Field to write the translated value to |
+  | `defaultValue` | No | Value to write when no mapping matches |
+  | `valueMapping` | Yes | Object where keys are source values and values are target values |
+</Accordion>
+
+<Accordion title="RegexFieldMap — transform values with regular expressions">
+  Applies a .NET regex `pattern` to `sourceField` and writes the replacement string to `targetField`.
+
+  ```json json
+  {
+    "FieldMapType": "RegexFieldMap",
+    "ApplyTo": ["SomeWorkItemType"],
+    "sourceField": "COMPANY.PRODUCT.Release",
+    "targetField": "COMPANY.DEVISION.MinorReleaseVersion",
+    "pattern": "PRODUCT \\d{4}.(\\d{1})",
+    "replacement": "$1"
+  }
+  ```
+
+  | Property | Required | Description |
+  |---|---|---|
+  | `sourceField` | Yes | Field containing the text to transform |
+  | `targetField` | Yes | Field to write the transformed value to |
+  | `pattern` | Yes | .NET regular expression match pattern |
+  | `replacement` | Yes | Replacement string (supports back-references like `$1`) |
+
+  <Warning>
+    Backslashes must be double-escaped in JSON: a single regex backslash becomes `\\\\` in the JSON string.
+  </Warning>
+</Accordion>
+
+<Accordion title="FieldMergeMap — concatenate multiple fields into one">
+  Merges the values of multiple source fields into a single target field using a format expression.
+
+  ```json json
+  {
+    "FieldMapType": "FieldMergeMap",
+    "ApplyTo": ["SomeWorkItemType"],
+    "sourceFields": ["Custom.FieldA", "Custom.FieldB"],
+    "targetField": "Custom.FieldC",
+    "formatExpression": "{0} \n {1}"
+  }
+  ```
+
+  | Property | Required | Description |
+  |---|---|---|
+  | `sourceFields` | Yes | Array of source field reference names |
+  | `targetField` | Yes | Field to write the merged value to |
+  | `formatExpression` | Yes | .NET composite format string; `{0}` is the first field, `{1}` the second, and so on |
+</Accordion>
+
+<Accordion title="FieldCalculationMap — compute a value from multiple fields">
+  Evaluates a mathematical expression referencing named parameters that map to source fields.
+
+  ```json json
+  {
+    "FieldMapType": "FieldCalculationMap",
+    "ApplyTo": ["Bug", "Task"],
+    "expression": "[effort] * [rate]",
+    "parameters": {
+      "effort": "Custom.EstimatedHours",
+      "rate": "Custom.HourlyRate"
+    },
+    "targetField": "Custom.EstimatedCost"
+  }
+  ```
+
+  | Property | Required | Description |
+  |---|---|---|
+  | `expression` | Yes | Mathematical expression using parameter names in square brackets |
+  | `parameters` | Yes | Object mapping parameter names to source field reference names |
+  | `targetField` | Yes | Field to write the computed value to |
+</Accordion>
+
+<Accordion title="FieldLiteralMap — write a fixed value">
+  Sets a target field to a constant value regardless of what the source contains.
+
+  ```json json
+  {
+    "FieldMapType": "FieldLiteralMap",
+    "ApplyTo": ["SomeWorkItemType"],
+    "targetField": "Custom.SomeField",
+    "value": "New field value"
+  }
+  ```
+
+  | Property | Required | Description |
+  |---|---|---|
+  | `targetField` | Yes | Field to write the literal value to |
+  | `value` | Yes | The constant string to write |
+</Accordion>
+
+<Accordion title="FieldClearMap — clear a field">
+  Removes the value from a target field.
+
+  ```json json
+  {
+    "FieldMapType": "FieldClearMap",
+    "ApplyTo": ["SomeWorkItemType"],
+    "targetField": "Custom.FieldC"
+  }
+  ```
+
+  | Property | Required | Description |
+  |---|---|---|
+  | `targetField` | Yes | Field to clear |
+</Accordion>
+
+<Accordion title="FieldToTagMap — append a field value as a tag">
+  Formats a source field value and appends it to the work item's tags.
+
+  ```json json
+  {
+    "FieldMapType": "FieldToTagMap",
+    "ApplyTo": ["SomeWorkItemType"],
+    "sourceField": "System.State",
+    "formatExpression": "ScrumState:{0}"
+  }
+  ```
+
+  | Property | Required | Description |
+  |---|---|---|
+  | `sourceField` | Yes | Field whose value becomes part of the tag |
+  | `formatExpression` | Yes | Format string; `{0}` is replaced with the field value |
+</Accordion>
+
+<Accordion title="FieldValueToTagMap — append a value conditionally as a tag">
+  Appends a formatted tag only when the source field value matches a pattern.
+
+  ```json json
+  {
+    "FieldMapType": "FieldValueToTagMap",
+    "ApplyTo": ["SomeWorkItemType"],
+    "sourceField": "Microsoft.VSTS.CMMI.Blocked",
+    "pattern": "Yes",
+    "formatExpression": "{0}"
+  }
+  ```
+
+  | Property | Required | Description |
+  |---|---|---|
+  | `sourceField` | Yes | Field to inspect |
+  | `pattern` | Yes | Value that triggers the tag |
+  | `formatExpression` | Yes | Format for the tag string |
+</Accordion>
+
+<Accordion title="FieldToTagFieldMap — merge HTML fields into a target field">
+  Combines HTML content from multiple fields into a single target field using a format expression. Useful for consolidating description and acceptance criteria into one field.
+
+  ```json json
+  {
+    "FieldMapType": "FieldToTagFieldMap",
+    "ApplyTo": ["SomeWorkItemType"],
+    "sourceFields": [
+      "System.Description",
+      "Microsoft.VSTS.Common.AcceptanceCriteria"
+    ],
+    "targetField": "System.Description",
+    "formatExpression": "{0} <br/><br/><h3>Acceptance Criteria</h3>{1}"
+  }
+  ```
+
+  | Property | Required | Description |
+  |---|---|---|
+  | `sourceFields` | Yes | Array of source field reference names |
+  | `targetField` | Yes | Field to write the combined HTML to |
+  | `formatExpression` | Yes | HTML format string |
+</Accordion>
+
+<Accordion title="MultiValueConditionalMap — set fields when conditions are met">
+  Sets one or more target fields to specific values when a set of source field conditions are all true.
+
+  ```json json
+  {
+    "FieldMapType": "MultiValueConditionalMap",
+    "ApplyTo": ["SomeWorkItemType"],
+    "sourceFieldsAndValues": {
+      "Field1": "Value1",
+      "Field2": "Value2"
+    },
+    "targetFieldsAndValues": {
+      "Field1": "Value1",
+      "Field2": "Value2"
+    }
+  }
+  ```
+
+  | Property | Required | Description |
+  |---|---|---|
+  | `sourceFieldsAndValues` | Yes | Conditions: all field/value pairs must match for the map to apply |
+  | `targetFieldsAndValues` | Yes | Fields and values to write when all conditions are met |
+</Accordion>
+
+<Accordion title="TreeToTagMap — convert area or iteration path segments to tags">
+  Reads path segments from the area or iteration tree and appends them as tags.
+
+  ```json json
+  {
+    "FieldMapType": "TreeToTagMap",
+    "ApplyTo": ["SomeWorkItemType"],
+    "toSkip": "3",
+    "timeTravel": "1"
+  }
+  ```
+
+  | Property | Required | Description |
+  |---|---|---|
+  | `toSkip` | No | Number of leading path segments to omit |
+  | `timeTravel` | No | Revision offset for reading historical path values |
+</Accordion>
+
+</AccordionGroup>
+
+## Complete example
+
+The following shows the `FieldMappingTool` as it appears in a full `configuration.json`, inside the `CommonTools` block alongside other tools:
+
+```json configuration.json
+{
+  "MigrationTools": {
+    "Version": "16.0",
+    "CommonTools": {
+      "FieldMappingTool": {
+        "Enabled": true,
+        "FieldMaps": [
+          {
+            "FieldMapType": "FieldtoFieldMap",
+            "ApplyTo": ["SomeWorkItemType"],
+            "sourceField": "System.AcceptanceCriteria",
+            "targetField": "System.AcceptanceCriteria2"
+          },
+          {
+            "FieldMapType": "FieldtoFieldMap",
+            "ApplyTo": ["SomeWorkItemType"],
+            "sourceField": "System.Description",
+            "targetField": "System.Description2"
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+## Practical notes
+
+- **Order matters.** Maps execute in array order. If map B depends on the result of map A, ensure A appears first.
+- **Target type specificity.** Prefer specific work item types over `["*"]` to avoid unintended side effects on work item types that don't need the transformation.
+- **Test with a small batch.** Run the migration against a handful of work items before a full run to verify each map produces the expected output.
+- **Performance.** Complex regex and calculation maps add per-work-item overhead. For large migrations, profile with and without the maps to understand the impact.

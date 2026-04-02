@@ -1,0 +1,74 @@
+---
+title: Permissions
+description: Required permissions for running the Azure DevOps Migration Tools against source and target environments, including PAT requirements.
+---
+
+The Azure DevOps Migration Tools use the [TFS Client Object Model](https://learn.microsoft.com/en-us/azure/devops/integrate/concepts/dotnet-client-libraries?view=azure-devops) to interact with TFS and Azure DevOps. This library has specific permission requirements that differ from the REST API.
+
+<Warning>
+  The Object Model API only works with **full-scoped PATs**. PATs with limited scopes are not compatible and will cause the tools to fail silently or with cryptic errors.
+</Warning>
+
+The tools also use a flag to bypass the Work Item rules engine, which allows data to be written in ways that don't comply with the usual workflow rules — for example, transitioning an item directly to `Closed` without starting at `New`. This capability requires elevated permissions on the target.
+
+## Source permissions
+
+You need the following on the **source** collection/organization:
+
+| Requirement | Details |
+|-------------|---------|
+| Group membership | **Project Collection Administrator** — overrides any denied permissions. |
+| PAT scope | **Full access** — even though the tools only read from the source, the Object Model requires a full-access PAT. |
+
+<Note>
+  The tools do not write any data to the source system, but a full-access PAT is still required due to the Object Model API requirements.
+</Note>
+
+## Target permissions
+
+You need the following on the **target** collection/organization:
+
+| Requirement | Details |
+|-------------|---------|
+| Group membership | **Project Collection Administrator** — overrides denied permissions and allows the rules engine bypass. |
+| Group membership | **Project Collection Service Accounts** (or **Project Collection Automation** on newer versions) — grants the "Make requests on behalf of others" permission. |
+| PAT scope | **Full access** |
+
+### Why "Make requests on behalf of others"?
+
+When the tools replay work item revisions, they set the `Changed By` and `Created By` fields to the original authors rather than the account running the migration. This requires the "Make requests on behalf of others" permission, which is **not** granted by default even to Project Collection Administrator members.
+
+#### Granting the permission on TFS (on-premises)
+
+On older versions of TFS, add the migration account to the **Project Collection Service Accounts** group using `tfssecurity`:
+
+```cmd
+tfssecurity /g+ "Project Collection Service Accounts" n:domain\username ALLOW /server:http://myserver:8080/tfs
+```
+
+Replace `domain\username` with the account running the migration, and `http://myserver:8080/tfs` with your TFS server URL.
+
+<Note>
+  This step is not required for Azure DevOps Services targets. The `tfssecurity` command is not available in that environment, and the permission is granted through group membership instead.
+</Note>
+
+## Unsupported: scoped PATs
+
+In some cases the tools may work with a scoped PAT and the following permissions, but this configuration has **not been fully tested** and is not officially supported:
+
+- Project and Team (Read, Write, and Manage)
+- Work Items (Read, Write, and Manage)
+- Identity (Read and Manage)
+- Security (Manage)
+
+<Tip>
+  If you experiment with scoped PATs and find a configuration that works reliably, share your results on [GitHub Discussions](https://github.com/nkdAgility/azure-devops-migration-tools/discussions).
+</Tip>
+
+## Summary
+
+| | Source | Target |
+|---|--------|--------|
+| Project Collection Administrator | Required | Required |
+| Project Collection Service Accounts | Not required | Required |
+| Full-access PAT | Required | Required |

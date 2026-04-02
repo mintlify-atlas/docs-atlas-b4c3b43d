@@ -1,97 +1,96 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "Azure DevOps Migration Tools"
+description: "Migrate Work Items, Test Plans, Pipelines, and Teams between TFS and Azure DevOps projects, collections, and organizations."
 ---
 
-## Setting up
+The Azure DevOps Migration Tools let you bulk-migrate and edit data between Team Projects on Microsoft Team Foundation Server (TFS) and Azure DevOps Services. Move work items with full history, attachments, and links — within the same organization or across organizations.
 
-Get your documentation site up and running in minutes.
+<Note>
+  These tools run on **Windows only** and support TFS 2013+ through the latest Azure DevOps Services. The primary command is `devopsmigration`.
+</Note>
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
+## Get started
 
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/setup/installation">
+    Install via Winget, Chocolatey, or manual ZIP download.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Quick Start" icon="rocket" href="/get-started/quickstart">
+    Run your first migration in minutes with a step-by-step guide.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Permissions" icon="shield-check" href="/setup/permissions">
+    Set up the required Azure DevOps permissions before migrating.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Configuration Reference" icon="sliders" href="/config/overview">
+    Understand the full configuration file structure and options.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## What you can migrate
 
-Everything you need to create world-class documentation.
+<CardGroup cols={2}>
+  <Card title="Work Items" icon="list-check" href="/how-to/migrate-work-items">
+    Migrate work items with complete revision history, attachments, and links. Supports custom field mapping, type remapping, and WIQL-based filtering.
+  </Card>
+  <Card title="Test Plans & Suites" icon="flask" href="/how-to/migrate-test-plans">
+    Migrate Test Plans, Test Suites, Test Cases, Shared Steps, Shared Parameters, Variables, and Configurations.
+  </Card>
+  <Card title="Pipelines" icon="arrows-spin" href="/reference/processors/pipeline-processor">
+    Copy YAML pipelines between Azure DevOps projects and organizations. (Classic build/release pipelines not supported.)
+  </Card>
+  <Card title="Bulk Edit" icon="pen-to-square" href="/how-to/bulk-edit">
+    Edit work items in place — ideal for process template changes, field cleanup, and data normalization.
+  </Card>
+</CardGroup>
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+## How it works
 
-## Need inspiration?
+<Steps>
+  <Step title="Install the tools">
+    Run `winget install nkdAgility.AzureDevOpsMigrationTools` or use Chocolatey: `choco install vsts-sync-migrator`.
+  </Step>
+  <Step title="Generate a configuration file">
+    Run `devopsmigration init --options Basic` to create a starter `configuration.json` in your working directory.
+  </Step>
+  <Step title="Configure source and target">
+    Edit `configuration.json` to set your source and target Azure DevOps collection URLs, project names, and Personal Access Tokens.
+  </Step>
+  <Step title="Add the ReflectedWorkItemId field">
+    Add the `Custom.ReflectedWorkItemId` custom field to your **target** project's work item types. This tracks which items have already been migrated.
+  </Step>
+  <Step title="Run the migration">
+    Execute `devopsmigration execute --config .\configuration.json` to start the migration. The tool validates configuration before processing begins.
+  </Step>
+</Steps>
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+## How-to guides
+
+<CardGroup cols={2}>
+  <Card title="Migrate work items" icon="arrow-right-arrow-left" href="/how-to/migrate-work-items">
+    Step-by-step guide for migrating work items between projects.
+  </Card>
+  <Card title="Migrate test plans" icon="vials" href="/how-to/migrate-test-plans">
+    Multi-step process for migrating test plans, suites, and cases.
+  </Card>
+  <Card title="Map users" icon="users" href="/how-to/user-mappings">
+    Maintain user identity integrity across different Azure DevOps organizations.
+  </Card>
+  <Card title="Map areas and iterations" icon="sitemap" href="/how-to/area-iteration-maps">
+    Remap area paths and iteration paths during migration using regex patterns.
+  </Card>
+</CardGroup>
+
+## Community and support
+
+<CardGroup cols={2}>
+  <Card title="GitHub Discussions" icon="comments" href="https://github.com/nkdAgility/azure-devops-migration-tools/discussions">
+    Ask questions and get community support on GitHub.
+  </Card>
+  <Card title="Report Issues" icon="bug" href="https://github.com/nkdAgility/azure-devops-migration-tools/issues">
+    Found a bug? Open an issue with logs attached.
+  </Card>
+</CardGroup>
+
+<Tip>
+  New to migration tools? Watch the [Basic Work Item Migration video](https://youtu.be/Qt1Ywu_KLrc) before you begin — migrations have many edge cases that are easier to understand with a visual walkthrough.
+</Tip>

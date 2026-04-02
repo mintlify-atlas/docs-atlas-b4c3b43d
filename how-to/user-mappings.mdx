@@ -1,0 +1,256 @@
+---
+title: Set up user identity mapping
+description: How to map user identities between source and target Azure DevOps systems so that work item assignments, history, and user references are preserved after migration.
+---
+
+When you migrate work items between Azure DevOps organizations or domains, user identity fields such as `Assigned To`, `Created By`, and `Changed By` reference accounts that may have different display names or email addresses in the target system. Without mapping, those fields either break or fall back to the migration service account.
+
+The `TfsUserMappingTool` lets you define explicit mappings from source user identities to target user identities. The process has two phases: export the current user mappings, edit the file to fill in any gaps, then run the migration with the mapping file active.
+
+## How it works
+
+1. Run `TfsExportUsersForMappingProcessor` to scan source work items and produce a JSON mapping file. Each source user is matched to a target user where possible, and left as `null` where no match is found.
+2. Edit the mapping file to fill in any users left as `null`.
+3. Run `TfsWorkItemMigrationProcessor` (or another migration processor) with `TfsUserMappingTool` enabled. The tool reads the mapping file and translates identity field values during migration.
+
+<Note>
+User matching is based on display name and email. If your source and target organizations use different email domains, most users will be unmatched after the export step and you will need to fill them in manually.
+</Note>
+
+---
+
+## Step 1: Export the user mapping file
+
+Run the following configuration to scan your source project and generate a starter mapping file at the path specified in `UserMappingFile`.
+
+```json
+{
+  "$schema": "https://devopsmigration.io/schema/configuration.schema.json",
+  "MigrationTools": {
+    "Version": "16.0",
+    "Endpoints": {
+      "Source": {
+        "EndpointType": "TfsTeamProjectEndpoint",
+        "Collection": "https://dev.azure.com/your-source-org/",
+        "Project": "AzureDevOps-Tools",
+        "AllowCrossProjectLinking": false,
+        "ReflectedWorkItemIdField": "nkdScrum.ReflectedWorkItemId",
+        "Authentication": {
+          "AuthenticationMode": "AccessToken",
+          "AccessToken": "YOUR_SOURCE_PAT"
+        },
+        "LanguageMaps": {
+          "AreaPath": "Area",
+          "IterationPath": "Iteration"
+        }
+      },
+      "Target": {
+        "EndpointType": "TfsTeamProjectEndpoint",
+        "Collection": "https://dev.azure.com/your-target-org/",
+        "Project": "migrationTest5",
+        "AllowCrossProjectLinking": false,
+        "ReflectedWorkItemIdField": "nkdScrum.ReflectedWorkItemId",
+        "Authentication": {
+          "AuthenticationMode": "AccessToken",
+          "AccessToken": "YOUR_TARGET_PAT"
+        },
+        "LanguageMaps": {
+          "AreaPath": "Area",
+          "IterationPath": "Iteration"
+        }
+      }
+    },
+    "CommonTools": {
+      "TfsUserMappingTool": {
+        "Enabled": true,
+        "UserMappingFile": "C:\\temp\\userExport.json",
+        "IdentityFieldsToCheck": [
+          "System.AssignedTo",
+          "System.ChangedBy",
+          "System.CreatedBy",
+          "Microsoft.VSTS.Common.ActivatedBy",
+          "Microsoft.VSTS.Common.ResolvedBy",
+          "Microsoft.VSTS.Common.ClosedBy"
+        ]
+      }
+    },
+    "Processors": [
+      {
+        "ProcessorType": "TfsExportUsersForMappingProcessor",
+        "Enabled": true,
+        "WIQLQuery": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject AND [System.WorkItemType] NOT IN ('Test Suite', 'Test Plan','Shared Steps','Shared Parameter','Feedback Request') ORDER BY [System.ChangedDate] desc",
+        "OnlyListUsersInWorkItems": true,
+        "SourceName": "Source",
+        "TargetName": "Target"
+      }
+    ]
+  }
+}
+```
+
+```bash
+devopsmigration execute --config .\export-users.json
+```
+
+<Tip>
+Set `OnlyListUsersInWorkItems` to `true` to limit the export to only users who appear in work items matching the WIQL query. This is much faster and more focused than exporting all users in the collection.
+</Tip>
+
+---
+
+## Step 2: Edit the mapping file
+
+The export produces a JSON file at the path you specified. It lists each source user and their matched target user. Where no match could be found automatically, `target` is `null`.
+
+**Example output:**
+
+```json
+[
+  {
+    "Source": {
+      "FriendlyName": "Martin Hinshelwood nkdAgility.com",
+      "AccountName": "martin@nkdagility.com"
+    },
+    "target": {
+      "FriendlyName": "Hinshelwood, Martin",
+      "AccountName": "martin@othercompany.com"
+    }
+  },
+  {
+    "Source": {
+      "FriendlyName": "Rollup Bot",
+      "AccountName": "Bot@nkdagility.com"
+    },
+    "target": {
+      "FriendlyName": "Service Account 4",
+      "AccountName": "randoaccount@somecompany.com"
+    }
+  },
+  {
+    "Source": {
+      "FriendlyName": "Another non mapped Account",
+      "AccountName": "not-mapped@nkdagility.com"
+    },
+    "target": null
+  }
+]
+```
+
+For each entry where `target` is `null`, fill in the corresponding target user's `FriendlyName` and `AccountName`. If a source user has no equivalent in the target system, you can leave `target` as `null` — that user's identity fields will not be translated during migration.
+
+<Warning>
+The migration tool matches on **display name** when looking up users in the target system. Make sure the `FriendlyName` values you enter in the mapping file exactly match how those users appear in the target Azure DevOps organization.
+</Warning>
+
+---
+
+## Step 3: Run the migration with user mapping enabled
+
+Add `TfsUserMappingTool` to `CommonTools` in your migration configuration, pointing to the edited mapping file. The tool applies the mappings to every identity field listed in `IdentityFieldsToCheck` during the migration run.
+
+```json
+{
+  "$schema": "https://devopsmigration.io/schema/configuration.schema.json",
+  "MigrationTools": {
+    "Version": "16.0",
+    "Endpoints": {
+      "Source": {
+        "EndpointType": "TfsTeamProjectEndpoint",
+        "Collection": "https://dev.azure.com/your-source-org/",
+        "Project": "AzureDevOps-Tools",
+        "AllowCrossProjectLinking": false,
+        "ReflectedWorkItemIdField": "nkdScrum.ReflectedWorkItemId",
+        "Authentication": {
+          "AuthenticationMode": "AccessToken",
+          "AccessToken": "YOUR_SOURCE_PAT"
+        },
+        "LanguageMaps": {
+          "AreaPath": "Area",
+          "IterationPath": "Iteration"
+        }
+      },
+      "Target": {
+        "EndpointType": "TfsTeamProjectEndpoint",
+        "Collection": "https://dev.azure.com/your-target-org/",
+        "Project": "migrationTest5",
+        "AllowCrossProjectLinking": false,
+        "ReflectedWorkItemIdField": "nkdScrum.ReflectedWorkItemId",
+        "Authentication": {
+          "AuthenticationMode": "AccessToken",
+          "AccessToken": "YOUR_TARGET_PAT"
+        },
+        "LanguageMaps": {
+          "AreaPath": "Area",
+          "IterationPath": "Iteration"
+        }
+      }
+    },
+    "CommonTools": {
+      "TfsUserMappingTool": {
+        "Enabled": true,
+        "UserMappingFile": "C:\\temp\\userExport.json",
+        "IdentityFieldsToCheck": [
+          "System.AssignedTo",
+          "System.ChangedBy",
+          "System.CreatedBy",
+          "Microsoft.VSTS.Common.ActivatedBy",
+          "Microsoft.VSTS.Common.ResolvedBy",
+          "Microsoft.VSTS.Common.ClosedBy"
+        ]
+      }
+    },
+    "Processors": [
+      {
+        "ProcessorType": "TfsWorkItemMigrationProcessor",
+        "Enabled": true,
+        "WIQLQuery": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject AND [System.WorkItemType] NOT IN ('Test Suite', 'Test Plan','Shared Steps','Shared Parameter','Feedback Request') ORDER BY [System.ChangedDate] desc"
+      }
+    ]
+  }
+}
+```
+
+```bash
+devopsmigration execute --config .\migrate-with-user-mapping.json
+```
+
+---
+
+## User mapping file format
+
+The mapping file is a JSON array. Each object has a `Source` entry and a `target` entry. Both use the same structure with `FriendlyName` and `AccountName`.
+
+```json
+[
+  {
+    "Source": {
+      "FriendlyName": "Display name as it appears in source",
+      "AccountName": "email@sourcedomain.com"
+    },
+    "target": {
+      "FriendlyName": "Display name as it appears in target",
+      "AccountName": "email@targetdomain.com"
+    }
+  }
+]
+```
+
+- `FriendlyName` is the display name shown in Azure DevOps
+- `AccountName` is the email or UPN of the account
+- Set `target` to `null` to leave a user unmapped (their identity fields will not be translated)
+
+## Configuration options reference
+
+| Option | Description |
+|--------|-------------|
+| `Enabled` | Set to `true` to activate user mapping during migration. |
+| `UserMappingFile` | Absolute path to the JSON user mapping file. |
+| `IdentityFieldsToCheck` | List of work item field reference names to apply mappings to. Add any custom identity fields your process template uses. |
+| `OnlyListUsersInWorkItems` | (`TfsExportUsersForMappingProcessor` only) When `true`, only users found in work items matching the WIQL query are included in the export. |
+
+## Best practices
+
+- Run the export against a scoped WIQL query that matches your actual migration query to avoid generating a large mapping file with users who will not be migrated.
+- Validate the mapping file against a test migration with a small subset of work items before running the full migration.
+- Store the mapping file in version control — it represents a decision about how users transfer between systems and should be reproducible.
+- Restrict file system access to the mapping file as it contains user identity information.

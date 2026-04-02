@@ -1,0 +1,244 @@
+---
+title: TfsWorkItemMigrationProcessor
+description: Full configuration reference for TfsWorkItemMigrationProcessor, the primary processor for migrating work items, links, and attachments between Azure DevOps instances.
+---
+
+`TfsWorkItemMigrationProcessor` is the main processor used to migrate work items, their full revision history, attachments, and links from a source Azure DevOps or TFS project to a target project. It is the starting point for most migrations.
+
+<Info>
+  This processor targets work items only. To migrate test plans and suites, use
+  [TfsTestPlansAndSuitesMigrationProcessor](/reference/processors/test-plans-suites) after
+  running this processor.
+</Info>
+
+## What it does
+
+- Transfers bugs, tasks, user stories, features, epics, and other work item types
+- Replays the full revision history of each work item
+- Migrates attachments and both internal (work item–to–work item) and external hyperlinks
+- Optionally updates `Created Date` and `Created By` metadata to match source values
+- Filters which work items to migrate using WIQL queries or explicit ID lists
+- Skips items that already exist in the target to support restart-safe incremental runs
+
+## Configuration options
+
+<ParamField body="ProcessorType" type="string" required>
+  Must be set to `"TfsWorkItemMigrationProcessor"` to identify which processor to use.
+</ParamField>
+
+<ParamField body="Enabled" type="boolean" required>
+  Set to `true` to run this processor. Set to `false` to skip it. Processors are always
+  present in the configuration but only execute when `Enabled` is `true`.
+</ParamField>
+
+<ParamField body="SourceName" type="string" required>
+  The name of the endpoint configured under `Endpoints` that the processor reads work
+  items from. Must match a TFS or Azure DevOps endpoint definition in your configuration.
+</ParamField>
+
+<ParamField body="TargetName" type="string" required>
+  The name of the endpoint configured under `Endpoints` that the processor writes work
+  items to. Must match a TFS or Azure DevOps endpoint definition in your configuration.
+</ParamField>
+
+<ParamField body="WIQLQuery" type="string" required default="SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject AND [System.WorkItemType] NOT IN ('Test Suite', 'Test Plan','Shared Steps','Shared Parameter','Feedback Request') ORDER BY [System.ChangedDate] desc">
+  A flat WIQL query (`FROM WorkItems`) that selects the work items to migrate from the
+  source project. Only flat queries are supported — hierarchical queries (`FROM
+  WorkItemLinks`) are not. Use `@TeamProject` as a placeholder for the source project
+  name. See [WIQL query examples](#wiql-query-examples) below.
+</ParamField>
+
+<ParamField body="WorkItemIDs" type="integer[]" default="[]">
+  An explicit list of work item IDs to migrate. When provided, this list is used
+  instead of `WIQLQuery`. Useful for targeted migrations or testing. Example:
+  `[123, 456, 789]`.
+</ParamField>
+
+<ParamField body="UpdateCreatedDate" type="boolean" default="true">
+  When `true`, the processor updates the `System.CreatedDate` field on the migrated work
+  item to match the original creation date in the source. Requires the service account
+  to have the "Bypass rules on work item updates" permission in the target project.
+</ParamField>
+
+<ParamField body="UpdateCreatedBy" type="boolean" default="true">
+  When `true`, the processor updates the `System.CreatedBy` field on the migrated work
+  item to match the original author in the source. Requires the service account to have
+  the "Bypass rules on work item updates" permission in the target project.
+</ParamField>
+
+<ParamField body="FilterWorkItemsThatAlreadyExistInTarget" type="boolean" default="false">
+  When `true`, the processor queries the target for all previously migrated work items
+  (using the reflected work item ID field) and removes them from the migration list
+  before starting. This makes the migration restartable without duplicating items. The
+  pre-check can take several minutes on large data sets but significantly reduces total
+  run time on reruns.
+</ParamField>
+
+<ParamField body="FixHtmlAttachmentLinks" type="boolean" default="true">
+  **Beta.** When `true`, the processor rewrites image attachment URLs, work item mention
+  URLs, and user `@mentions` inside HTML description fields and discussion comments so
+  they point to the target system. For Azure DevOps sources you must supply a
+  `PersonalAccessToken` in the source endpoint. TFS sources use integrated
+  authentication.
+</ParamField>
+
+<ParamField body="WorkItemCreateRetryLimit" type="integer" default="5">
+  **Beta.** Number of times the processor retries saving a work item when a transient
+  failure occurs. Each retry waits a number of seconds equal to the retry attempt
+  number. Set to `0` to disable retries.
+</ParamField>
+
+<ParamField body="AttachRevisionHistory" type="boolean" default="false">
+  When `true`, the processor creates a JSON file containing the full revision history
+  of each work item and attaches it to the migrated item. Most useful when combined
+  with `MaxRevisions` or `ReplayRevisions` settings on the revision enricher, where the
+  full history is not replayed inline.
+</ParamField>
+
+<ParamField body="GenerateMigrationComment" type="boolean" default="true">
+  When `true`, the processor adds a discussion comment to each migrated work item
+  recording the source work item ID and source project URL. This provides a clear audit
+  trail in the target.
+</ParamField>
+
+<ParamField body="MaxGracefulFailures" type="integer" default="0">
+  The maximum number of individual work item failures to tolerate before the entire
+  migration run fails. When set above `0`, errors on individual items are logged and
+  skipped until this threshold is reached. Set to `0` to fail immediately on the first
+  error.
+</ParamField>
+
+<ParamField body="PauseAfterEachWorkItem" type="boolean" default="false">
+  When `true`, the processor pauses and waits for a key press after migrating each work
+  item. Intended for debugging or step-through inspection of results. Do not enable in
+  production migrations.
+</ParamField>
+
+<ParamField body="SkipRevisionWithInvalidIterationPath" type="boolean">
+  When `true`, revisions whose iteration path does not exist in the target are silently
+  skipped rather than causing an error. Useful when source iteration paths have been
+  deleted or were never migrated to the target.
+</ParamField>
+
+<ParamField body="SkipRevisionWithInvalidAreaPath" type="boolean">
+  When `true`, revisions whose area path does not exist in the target are silently
+  skipped. Useful when source area paths were deleted or remapped to different paths
+  in the target.
+</ParamField>
+
+<ParamField body="Enrichers" type="object[]">
+  List of processor enricher configurations that extend migration behaviour. Enrichers
+  are applied to each work item during migration. Only native (non-legacy) processors
+  support enrichers. Common enrichers include `TfsNodeStructureTool` for area/iteration
+  path mapping and `TfsRevisionManagerTool` for controlling how many revisions are
+  replayed.
+</ParamField>
+
+<ParamField body="RefName" type="string">
+  Reserved for future use. Will allow referencing a named options block to avoid
+  duplicating configuration across multiple processor entries.
+</ParamField>
+
+## WIQL query examples
+
+All queries must use `FROM WorkItems` (flat query). The `@TeamProject` token is replaced
+at runtime with the source project name from your endpoint configuration.
+
+<AccordionGroup>
+  <Accordion title="Migrate all work items (excluding test types)">
+    ```json
+    "WIQLQuery": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject AND [System.WorkItemType] NOT IN ('Test Suite', 'Test Plan','Shared Steps','Shared Parameter','Feedback Request') ORDER BY [System.ChangedDate] desc"
+    ```
+  </Accordion>
+
+  <Accordion title="Migrate work items under a specific area path">
+    ```json
+    "WIQLQuery": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject AND [System.AreaPath] UNDER 'MyProject\\Team 1' AND [System.WorkItemType] NOT IN ('Test Suite', 'Test Plan','Shared Steps','Shared Parameter','Feedback Request') ORDER BY [System.ChangedDate] desc"
+    ```
+  </Accordion>
+
+  <Accordion title="Migrate specific work items by ID (for testing)">
+    ```json
+    "WIQLQuery": "SELECT [System.Id] FROM WorkItems WHERE [System.Id] IN (123, 456, 789) AND [System.TeamProject] = @TeamProject ORDER BY [System.ChangedDate] desc"
+    ```
+
+    Alternatively, use `WorkItemIDs` directly:
+    ```json
+    "WorkItemIDs": [123, 456, 789]
+    ```
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+  A useful Azure DevOps Marketplace extension for building and testing WIQL queries is
+  the [WIQL Editor](https://marketplace.visualstudio.com/items?itemName=ottostreifel.wiql-editor).
+</Note>
+
+## Complete configuration example
+
+```json
+{
+  "MigrationTools": {
+    "Version": "16.0",
+    "Processors": [
+      {
+        "ProcessorType": "TfsWorkItemMigrationProcessor",
+        "Enabled": true,
+        "SourceName": "Source",
+        "TargetName": "Target",
+        "WIQLQuery": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject AND [System.WorkItemType] NOT IN ('Test Suite', 'Test Plan','Shared Steps','Shared Parameter','Feedback Request') ORDER BY [System.ChangedDate] desc",
+        "WorkItemIDs": null,
+        "UpdateCreatedDate": true,
+        "UpdateCreatedBy": true,
+        "FilterWorkItemsThatAlreadyExistInTarget": true,
+        "FixHtmlAttachmentLinks": true,
+        "WorkItemCreateRetryLimit": 5,
+        "AttachRevisionHistory": false,
+        "GenerateMigrationComment": true,
+        "MaxGracefulFailures": 0,
+        "PauseAfterEachWorkItem": false,
+        "SkipRevisionWithInvalidIterationPath": false,
+        "SkipRevisionWithInvalidAreaPath": false
+      }
+    ]
+  }
+}
+```
+
+## Prerequisites
+
+<Warning>
+  The service account used by the target endpoint must have the **Bypass rules on work
+  item updates** permission (under Project Settings > Security) if you enable
+  `UpdateCreatedDate` or `UpdateCreatedBy`. Without this permission those fields will
+  reflect the migration date and migration user instead of the original values.
+</Warning>
+
+Before running this processor:
+
+1. Migrate area paths and iteration paths using `TfsNodeStructureTool` (configured as an enricher or in the tools section) so that source paths exist in the target.
+2. Configure field maps if work item type names or field names differ between source and target. See [field maps reference](/reference/field-maps).
+3. Ensure the reflected work item ID field (typically `TfsMigrationTool.ReflectedWorkItemId`) is added to the target process template so the processor can track previously migrated items.
+
+## Remapping area and iteration paths
+
+When teams are restructured between source and target, use `FieldMaps` with a
+`FieldValueMapConfig` to remap area or iteration paths:
+
+```json
+"FieldMaps": [
+  {
+    "$type": "FieldValueMapConfig",
+    "WorkItemTypeName": "*",
+    "sourceField": "System.AreaPath",
+    "targetField": "System.AreaPath",
+    "defaultValue": "TargetProject",
+    "valueMapping": {
+      "SourceProject\\Team 1": "TargetProject\\Team A",
+      "SourceProject\\Team 2": "TargetProject\\Team B"
+    }
+  }
+]
+```
+
+See the [field maps reference](/reference/field-maps) for all available mapping types.

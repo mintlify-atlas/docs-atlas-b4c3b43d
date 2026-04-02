@@ -1,0 +1,155 @@
+---
+title: TfsTestPlansAndSuitesMigrationProcessor
+description: Configuration reference for TfsTestPlansAndSuitesMigrationProcessor, which migrates test plans, test suites, and their configurations after work items have been migrated.
+---
+
+`TfsTestPlansAndSuitesMigrationProcessor` rebuilds test plans and test suites in the target project for test cases that were already migrated using `TfsWorkItemMigrationProcessor`. It does not migrate the test case work items themselves — those must be migrated first.
+
+<Warning>
+  **Beta processor.** This processor is marked Beta. Run it after
+  [TfsWorkItemMigrationProcessor](/reference/processors/work-item-migration) has
+  successfully migrated the underlying test case work items.
+</Warning>
+
+## What it does
+
+- Recreates the test plan hierarchy (plans → suites → test cases) in the target project
+- Migrates test suite membership, preserving the relationship between suites and their test cases
+- Supports filtering by tag, test plan name/area path, or explicit test plan IDs
+- Optionally removes invalid test suite links that cannot be resolved in the target
+- Can delay execution between plans to avoid rate-limiting on large migrations
+
+## Prerequisites
+
+1. Test case work items must already be migrated to the target using `TfsWorkItemMigrationProcessor`.
+2. The source and target endpoints must be TFS or Azure DevOps collections (not REST-only endpoints).
+3. Node structure (area paths and iteration paths) must be migrated before running this processor.
+
+## Configuration options
+
+<ParamField body="ProcessorType" type="string" required>
+  Must be set to `"TfsTestPlansAndSuitesMigrationProcessor"`.
+</ParamField>
+
+<ParamField body="Enabled" type="boolean" required>
+  Set to `true` to run this processor. Set to `false` to skip it without removing it
+  from the configuration.
+</ParamField>
+
+<ParamField body="SourceName" type="string" required>
+  The name of the source endpoint from which test plans and suites are read.
+</ParamField>
+
+<ParamField body="TargetName" type="string" required>
+  The name of the target endpoint to which test plans and suites are written.
+</ParamField>
+
+<ParamField body="OnlyElementsWithTag" type="string" default="">
+  When set, only test plans that have this tag are migrated. Leave empty (or `null`) to
+  migrate all test plans regardless of tags.
+</ParamField>
+
+<ParamField body="TestPlanQuery" type="string" default="">
+  A partial query string appended after `SELECT * FROM TestPlan WHERE` to filter which
+  test plans are migrated. Known usable fields include `AreaPath`, `PlanName`, and
+  `PlanState`. When `null`, all test plans are candidates for migration. Works best
+  when `TestPlanIds` is also `null`.
+
+  Example: `"PlanState = 'Active'"` to migrate only active test plans.
+</ParamField>
+
+<ParamField body="TestPlanIds" type="integer[]">
+  An explicit list of test plan IDs to migrate. When provided, only these plans are
+  processed. Works best when `TestPlanQuery` is `null`. Example: `[123, 456, 789]`.
+</ParamField>
+
+<ParamField body="FilterCompleted" type="boolean">
+  When `true`, completed test plans are excluded from migration. The exact definition of
+  "completed" follows the Azure DevOps test plan state model.
+</ParamField>
+
+<ParamField body="RemoveAllLinks" type="boolean" default="false">
+  When `true`, all existing links on the target test suite are removed before
+  re-adding them from the source. Use with caution — this is destructive to any
+  links added manually in the target.
+</ParamField>
+
+<ParamField body="RemoveInvalidTestSuiteLinks" type="boolean" default="false">
+  When `true`, test suite links that cannot be resolved in the target (for example,
+  because the linked work item was not migrated) are removed rather than causing the
+  migration to error. Recommended for large migrations where not all work items are in
+  scope.
+</ParamField>
+
+<ParamField body="MigrationDelay" type="integer" default="0">
+  Number of milliseconds to wait between migrating each test plan. Set this above zero
+  when migrating large numbers of test plans to avoid throttling by the Azure DevOps
+  API.
+</ParamField>
+
+<ParamField body="Enrichers" type="object[]">
+  List of processor enricher configurations. Only native processors support enrichers.
+</ParamField>
+
+<ParamField body="RefName" type="string">
+  Reserved for future use. Will allow referencing a named options block.
+</ParamField>
+
+## Complete configuration example
+
+```json
+{
+  "MigrationTools": {
+    "Version": "16.0",
+    "Processors": [
+      {
+        "ProcessorType": "TfsTestPlansAndSuitesMigrationProcessor",
+        "Enabled": true,
+        "SourceName": "Source",
+        "TargetName": "Target",
+        "OnlyElementsWithTag": null,
+        "TestPlanQuery": null,
+        "TestPlanIds": [],
+        "FilterCompleted": false,
+        "RemoveAllLinks": false,
+        "RemoveInvalidTestSuiteLinks": false,
+        "MigrationDelay": 0
+      }
+    ]
+  }
+}
+```
+
+### Migrate only specific test plans by ID
+
+```json
+{
+  "ProcessorType": "TfsTestPlansAndSuitesMigrationProcessor",
+  "Enabled": true,
+  "SourceName": "Source",
+  "TargetName": "Target",
+  "TestPlanIds": [101, 202, 303],
+  "TestPlanQuery": null,
+  "RemoveInvalidTestSuiteLinks": true
+}
+```
+
+### Migrate only active test plans
+
+```json
+{
+  "ProcessorType": "TfsTestPlansAndSuitesMigrationProcessor",
+  "Enabled": true,
+  "SourceName": "Source",
+  "TargetName": "Target",
+  "TestPlanQuery": "PlanState = 'Active'",
+  "FilterCompleted": true,
+  "RemoveInvalidTestSuiteLinks": true
+}
+```
+
+## Related processors
+
+- [TfsWorkItemMigrationProcessor](/reference/processors/work-item-migration) — migrate test case work items first
+- [TfsTestVariablesMigrationProcessor](/reference/processors/utilities) — migrate test variables before migrating plans
+- [TfsTestConfigurationsMigrationProcessor](/reference/processors/utilities) — migrate test configurations before migrating plans

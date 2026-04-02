@@ -1,0 +1,395 @@
+---
+title: "CommonTools"
+description: "Configure the shared tools in Azure DevOps Migration Tools — FieldMappingTool, TfsNodeStructureTool, TfsUserMappingTool, TfsRevisionManagerTool, TfsTeamSettingsTool, TfsAttachmentTool, WorkItemTypeMappingTool, TfsGitRepositoryTool, and StringManipulatorTool."
+---
+
+Tools are reusable components that processors rely on to perform specific operations during migration. They are defined once in `MigrationTools.CommonTools` and shared across all processors. Each tool is identified by its key name and has an `Enabled` flag to control whether it is active.
+
+```json
+{
+  "MigrationTools": {
+    "CommonTools": {
+      "ToolName": {
+        "Enabled": true,
+        ...
+      }
+    }
+  }
+}
+```
+
+<Note>
+  Disabling a tool with `"Enabled": false` means that processors which depend on it will run without that tool's functionality. For example, disabling `TfsNodeStructureTool` means area and iteration paths will not be remapped.
+</Note>
+
+## FieldMappingTool
+
+The Field Mapping Tool applies field transformation rules to work items during migration. It reads the `FieldMaps` array and applies each map to work items that match the `ApplyTo` criteria. See [Field maps](/config/field-maps) for the full list of available map types.
+
+<Accordion title="Configuration options" defaultOpen={true}>
+
+```json
+"FieldMappingTool": {
+  "Enabled": true,
+  "FieldMaps": [
+    {
+      "FieldMapType": "FieldtoFieldMap",
+      "ApplyTo": [ "SomeWorkItemType" ],
+      "sourceField": "System.AcceptanceCriteria",
+      "targetField": "System.AcceptanceCriteria2"
+    },
+    {
+      "FieldMapType": "FieldtoFieldMap",
+      "ApplyTo": [ "SomeWorkItemType" ],
+      "sourceField": "System.Description",
+      "targetField": "System.Description2"
+    }
+  ]
+}
+```
+
+<ParamField body="Enabled" type="boolean" required>
+  Set to `true` to activate field mapping during migration.
+</ParamField>
+
+<ParamField body="FieldMaps" type="array">
+  An ordered list of field map configurations. Each entry requires at minimum `FieldMapType` and `ApplyTo`. Maps are applied in array order to each work item. See [Field maps](/config/field-maps) for detailed documentation of every map type.
+</ParamField>
+
+</Accordion>
+
+## TfsNodeStructureTool
+
+Manages the migration of Area Path and Iteration Path node structures. It can filter which nodes are migrated, remap path names between source and target, create missing nodes in the target, and replicate the full source node hierarchy.
+
+<Accordion title="Configuration options">
+
+```json
+"TfsNodeStructureTool": {
+  "Enabled": true,
+  "Areas": {
+    "Filters": [ " *\\Team 1,*\\Team 1\\**" ],
+    "Mappings": [
+      {
+        "Match": "^Skypoint Cloud([\\\\]?.*)$",
+        "Replacement": "MigrationTest5$1"
+      },
+      {
+        "Match": "^7473924d-c47f-4089-8f5c-077c728b576e([\\\\]?.*)$",
+        "Replacement": "MigrationTest5$1"
+      }
+    ]
+  },
+  "Iterations": {
+    "Filters": [],
+    "Mappings": [
+      {
+        "Match": "^Skypoint Cloud([\\\\]?.*)$",
+        "Replacement": "MigrationTest5$1"
+      },
+      {
+        "Match": "^7473924d-c47f-4089-8f5c-077c728b576e([\\\\]?.*)$",
+        "Replacement": "MigrationTest5$1"
+      }
+    ]
+  },
+  "ShouldCreateMissingRevisionPaths": true,
+  "ReplicateAllExistingNodes": true
+}
+```
+
+<ParamField body="Enabled" type="boolean" required>
+  Set to `true` to enable area and iteration path migration and remapping.
+</ParamField>
+
+<ParamField body="Areas" type="object">
+  Configuration for Area Path migration.
+
+  - `Filters` (string array): Glob patterns to filter which area paths are included. Leave empty to include all. Example: `"*\\Team 1,*\\Team 1\\**"` includes only Team 1 and its children.
+  - `Mappings` (array): Regex-based rename rules. Each entry has a `Match` pattern and a `Replacement` string. Backreferences (`$1`) are supported.
+</ParamField>
+
+<ParamField body="Iterations" type="object">
+  Configuration for Iteration Path migration. Same structure as `Areas` — `Filters` and `Mappings`.
+</ParamField>
+
+<ParamField body="ShouldCreateMissingRevisionPaths" type="boolean" default="true">
+  When `true`, creates area and iteration path nodes in the target that are referenced by historical revisions but do not exist in the current source structure. Prevents revision replay failures caused by missing paths.
+</ParamField>
+
+<ParamField body="ReplicateAllExistingNodes" type="boolean" default="true">
+  When `true`, copies the entire area and iteration path tree from the source to the target before migrating work items. Ensures the target has a complete node structure before work items reference those nodes.
+</ParamField>
+
+</Accordion>
+
+## TfsUserMappingTool
+
+Maps user identities between source and target systems. This is necessary when user accounts have different display names, email addresses, or UPNs between the source and target organisations. The tool reads a user mapping file produced by `TfsExportUsersForMappingProcessor`.
+
+<Accordion title="Configuration options">
+
+```json
+"TfsUserMappingTool": {
+  "Enabled": true,
+  "UserMappingFile": "C:\\temp\\userExport.json",
+  "IdentityFieldsToCheck": [
+    "System.AssignedTo",
+    "System.ChangedBy",
+    "System.CreatedBy",
+    "Microsoft.VSTS.Common.ActivatedBy",
+    "Microsoft.VSTS.Common.ResolvedBy",
+    "Microsoft.VSTS.Common.ClosedBy"
+  ]
+}
+```
+
+<ParamField body="Enabled" type="boolean" required>
+  Set to `true` to apply user identity mapping during migration.
+</ParamField>
+
+<ParamField body="UserMappingFile" type="string">
+  Full path to the JSON file containing source-to-target user identity mappings. Generate this file first by running `TfsExportUsersForMappingProcessor`, then edit the entries to map each source identity to the correct target identity.
+</ParamField>
+
+<ParamField body="IdentityFieldsToCheck" type="string[]">
+  List of work item field reference names that contain user identities. The tool rewrites values in these fields using the mapping file. The default list covers the most common identity fields.
+</ParamField>
+
+</Accordion>
+
+## TfsRevisionManagerTool
+
+Controls how work item revision history is handled during migration. You can choose to replay all revisions (preserving full history) or limit the number of revisions migrated.
+
+<Accordion title="Configuration options">
+
+```json
+"TfsRevisionManagerTool": {
+  "Enabled": true,
+  "ReplayRevisions": true,
+  "MaxRevisions": 0
+}
+```
+
+<ParamField body="Enabled" type="boolean" required>
+  Set to `true` to enable revision management.
+</ParamField>
+
+<ParamField body="ReplayRevisions" type="boolean" default="true">
+  When `true`, the tool replays each historical revision of a work item, creating the full revision history in the target. When `false`, only the latest state of each work item is migrated.
+</ParamField>
+
+<ParamField body="MaxRevisions" type="number" default="0">
+  The maximum number of revisions to migrate per work item. Set to `0` for no limit (migrate all revisions). Set to a positive integer to cap revisions — for example, `10` to migrate only the 10 most recent revisions. Useful for reducing migration time on heavily-revised items.
+</ParamField>
+
+</Accordion>
+
+## TfsTeamSettingsTool
+
+Migrates team configuration settings from the source project to the target. This includes which teams exist, their backlog settings, iteration paths, and capacity allocations.
+
+<Accordion title="Configuration options">
+
+```json
+"TfsTeamSettingsTool": {
+  "Enabled": true,
+  "MigrateTeamSettings": true,
+  "UpdateTeamSettings": true,
+  "MigrateTeamCapacities": true,
+  "Teams": [ "Team 1", "Team 2" ]
+}
+```
+
+<ParamField body="Enabled" type="boolean" required>
+  Set to `true` to enable team settings migration.
+</ParamField>
+
+<ParamField body="MigrateTeamSettings" type="boolean" default="true">
+  When `true`, migrates team configuration including backlog navigation levels and iteration/area path assignments.
+</ParamField>
+
+<ParamField body="UpdateTeamSettings" type="boolean" default="true">
+  When `true`, updates existing team settings in the target if the team already exists. When `false`, only creates settings for new teams.
+</ParamField>
+
+<ParamField body="MigrateTeamCapacities" type="boolean" default="true">
+  When `true`, migrates sprint capacity settings for each team member. Requires user identities to be resolvable in the target — configure `TfsUserMappingTool` first if identities differ between organisations.
+</ParamField>
+
+<ParamField body="Teams" type="string[]">
+  An explicit list of team names to migrate. Only teams in this list are processed. Leave the array empty or omit this field to migrate all teams.
+</ParamField>
+
+</Accordion>
+
+## TfsAttachmentTool
+
+Manages the migration of work item file attachments. The tool downloads attachments from the source to a local staging directory, then uploads them to the target.
+
+<Accordion title="Configuration options">
+
+```json
+"TfsAttachmentTool": {
+  "RefName": "TfsAttachmentTool",
+  "Enabled": true,
+  "ExportBasePath": "c:\\temp\\WorkItemAttachmentExport",
+  "MaxRevisions": 480000000
+}
+```
+
+<ParamField body="Enabled" type="boolean" required>
+  Set to `true` to include attachment migration.
+</ParamField>
+
+<ParamField body="RefName" type="string">
+  Internal reference name for the tool instance. Typically left as `"TfsAttachmentTool"`.
+</ParamField>
+
+<ParamField body="ExportBasePath" type="string">
+  Local filesystem path where attachments are staged during migration. The directory must exist and the user running the tool must have write access. Ensure sufficient disk space for the total size of all attachments being migrated.
+</ParamField>
+
+<ParamField body="MaxRevisions" type="number" default="480000000">
+  Maximum total size (in bytes) of attachments to export per work item. The default value (`480000000` ≈ 480 MB) is effectively unlimited for most migrations. Reduce this to cap attachment storage usage.
+</ParamField>
+
+</Accordion>
+
+## WorkItemTypeMappingTool
+
+Maps work item type names from source to target. Use this when the source and target projects use different process templates with different work item type names (for example, Scrum's `Product Backlog Item` vs Agile's `User Story`).
+
+<Accordion title="Configuration options">
+
+```json
+"WorkItemTypeMappingTool": {
+  "Enabled": true,
+  "Mappings": {
+    "User Story": "Product Backlog Item"
+  }
+}
+```
+
+<ParamField body="Enabled" type="boolean" required>
+  Set to `true` to apply work item type name remapping.
+</ParamField>
+
+<ParamField body="Mappings" type="object">
+  A dictionary of source-to-target work item type name mappings. Keys are source type names; values are target type names. For example, `"User Story": "Product Backlog Item"` renames all `User Story` items to `Product Backlog Item` in the target.
+
+  Multiple mappings can be specified:
+  ```json
+  "Mappings": {
+    "User Story": "Product Backlog Item",
+    "Feature": "Epic"
+  }
+  ```
+</ParamField>
+
+</Accordion>
+
+## TfsGitRepositoryTool
+
+Maps Git repository names between source and target organisations. Work items may contain links to Git commits, pull requests, or branches. This tool rewrites those links to point to the correct repository in the target.
+
+<Accordion title="Configuration options">
+
+```json
+"TfsGitRepositoryTool": {
+  "Enabled": true,
+  "Mappings": {
+    "Source Repo Name": "Target Repo Name"
+  }
+}
+```
+
+<ParamField body="Enabled" type="boolean" required>
+  Set to `true` to enable Git repository link remapping.
+</ParamField>
+
+<ParamField body="Mappings" type="object">
+  A dictionary mapping source repository names to target repository names. The key is the repository name in the source organisation; the value is the repository name in the target organisation.
+
+  ```json
+  "Mappings": {
+    "MyApp": "MyApp",
+    "OldRepoName": "NewRepoName"
+  }
+  ```
+
+  Repositories with identical names in source and target still need to be listed if you want their links remapped.
+</ParamField>
+
+</Accordion>
+
+## TfsChangeSetMappingTool
+
+Maps Team Foundation Version Control (TFVC) changeset IDs from the source to corresponding IDs in the target. This is used to maintain correct changeset reference links when work items have been associated with TFVC changesets. Provide a path to a JSON mapping file that maps source changeset IDs to target changeset IDs.
+
+<Accordion title="Configuration options">
+
+```json
+"TfsChangeSetMappingTool": {
+  "Enabled": true,
+  "ChangeSetMappingFile": "C:\\temp\\ChangeSetMappingFile.json"
+}
+```
+
+<ParamField body="Enabled" type="boolean" required>
+  Set to `true` to enable changeset mapping.
+</ParamField>
+
+<ParamField body="ChangeSetMappingFile" type="string">
+  Full path to the JSON file containing changeset ID mappings. The file maps source changeset IDs to target changeset IDs so that work item links to changesets are preserved correctly after migration.
+</ParamField>
+
+</Accordion>
+
+## StringManipulatorTool
+
+Processes and cleans up string fields in work items. Applies a list of regex-based manipulations and enforces a maximum string length. Useful for removing characters that are invalid in the target system's encoding, or for stripping legacy formatting.
+
+<Accordion title="Configuration options">
+
+```json
+"StringManipulatorTool": {
+  "Enabled": true,
+  "MaxStringLength": 1000000,
+  "Manipulators": [
+    {
+      "$type": "RegexStringManipulator",
+      "Enabled": true,
+      "Pattern": "[^( -~)\n\r\t]+",
+      "Replacement": "",
+      "Description": "Remove invalid characters from the end of the string"
+    }
+  ]
+}
+```
+
+<ParamField body="Enabled" type="boolean" required>
+  Set to `true` to enable string manipulation on all text fields.
+</ParamField>
+
+<ParamField body="MaxStringLength" type="number" default="1000000">
+  Strings longer than this value (in characters) are truncated. The default of `1000000` is effectively unlimited for most fields. Azure DevOps has a field length limit of approximately 1 MB for HTML fields.
+</ParamField>
+
+<ParamField body="Manipulators" type="array">
+  An ordered list of string manipulator rules. Each entry must include `"$type": "RegexStringManipulator"` and the following fields:
+
+  - `Enabled` (boolean): Toggle this specific manipulator on or off.
+  - `Pattern` (string): The .NET regex pattern to match.
+  - `Replacement` (string): The replacement string. Use `""` to delete matched text.
+  - `Description` (string): A human-readable description of what this manipulator does.
+
+  Manipulators are applied in array order. The default manipulator removes non-printable characters outside the standard ASCII printable range while preserving newlines, carriage returns, and tabs.
+</ParamField>
+
+</Accordion>
+
+<Tip>
+  The default `RegexStringManipulator` with pattern `[^( -~)\n\r\t]+` removes characters that cause import failures when the target system enforces strict UTF-8 or ASCII encoding. Keep this manipulator enabled unless you are certain your source data is clean.
+</Tip>

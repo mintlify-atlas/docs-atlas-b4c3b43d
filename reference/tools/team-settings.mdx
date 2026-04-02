@@ -1,0 +1,159 @@
+---
+title: TfsTeamSettingsTool
+description: Migrate and update team configurations — area paths, iteration paths, backlog levels, and sprint capacities — from a source project to the target.
+---
+
+The `TfsTeamSettingsTool` migrates team-specific settings so that teams can continue working in the target project without manual reconfiguration. It covers the settings that live inside each team's configuration panel: which area paths the team owns, which iterations are active, which backlog levels are visible, and per-member sprint capacities.
+
+Use this tool after [TfsNodeStructureTool](/reference/tools/node-structure) has created the required area and iteration nodes in the target, and after teams themselves have been created.
+
+## Configuration
+
+Place the `TfsTeamSettingsTool` block inside `MigrationTools.CommonTools`:
+
+```json configuration.json
+{
+  "MigrationTools": {
+    "Version": "16.0",
+    "CommonTools": {
+      "TfsTeamSettingsTool": {
+        "Enabled": true,
+        "MigrateTeamSettings": true,
+        "UpdateTeamSettings": true,
+        "MigrateTeamCapacities": true,
+        "Teams": ["Team 1", "Team 2"]
+      }
+    }
+  }
+}
+```
+
+## Options
+
+<ParamField body="Enabled" type="boolean" default="true">
+  Set to `true` to activate the tool.
+</ParamField>
+
+<ParamField body="MigrateTeamSettings" type="boolean" default="false">
+  When `true`, team settings (area paths, iteration paths, and backlog navigation levels) are copied from the source team to the corresponding team in the target project. This creates the team configuration if the team already exists in the target but has not been configured.
+</ParamField>
+
+<ParamField body="UpdateTeamSettings" type="boolean" default="false">
+  When `true`, the target team's settings are reset to match the source, even if the target team was already configured. Use this to keep teams in sync after incremental migrations or to correct a previously migrated team.
+
+  When `false`, existing target team settings are left unchanged.
+</ParamField>
+
+<ParamField body="MigrateTeamCapacities" type="boolean" default="false">
+  When `true`, per-sprint per-member capacity settings are copied from the source team to the target team.
+
+  <Note>
+    Capacities are matched by team member display name. If a member does not exist in the target collection with the same display name, their capacity is skipped. Enable `UseUserMapping` to also match members using the user mapping file.
+  </Note>
+</ParamField>
+
+<ParamField body="UseUserMapping" type="boolean">
+  When `true` and `MigrateTeamCapacities` is also `true`, team members are matched against the user mapping file (configured in `TfsUserMappingTool`) in addition to display name matching. This allows capacity to be migrated even when member display names differ between source and target.
+</ParamField>
+
+<ParamField body="Teams" type="string[]">
+  List of team names to process. Names must match the source team names exactly (case-sensitive).
+
+  When `null` or omitted, all teams in the source project are processed.
+
+  ```json json
+  "Teams": ["Team 1", "Team 2", "Platform Team"]
+  ```
+</ParamField>
+
+## Scenarios
+
+<AccordionGroup>
+
+<Accordion title="Migrate all teams with full settings">
+  Process every team in the source project and copy all settings and capacities:
+
+  ```json json
+  {
+    "TfsTeamSettingsTool": {
+      "Enabled": true,
+      "MigrateTeamSettings": true,
+      "UpdateTeamSettings": true,
+      "MigrateTeamCapacities": true
+    }
+  }
+  ```
+
+  Omitting `Teams` (or setting it to `null`) causes all teams to be processed.
+</Accordion>
+
+<Accordion title="Migrate specific teams only">
+  Limit processing to a named subset of teams:
+
+  ```json json
+  {
+    "TfsTeamSettingsTool": {
+      "Enabled": true,
+      "MigrateTeamSettings": true,
+      "UpdateTeamSettings": true,
+      "MigrateTeamCapacities": true,
+      "Teams": ["Team 1", "Team 2"]
+    }
+  }
+  ```
+</Accordion>
+
+<Accordion title="Update existing team settings without full migration">
+  Sync settings for teams that already exist in the target, without creating new teams or migrating capacities:
+
+  ```json json
+  {
+    "TfsTeamSettingsTool": {
+      "Enabled": true,
+      "MigrateTeamSettings": false,
+      "UpdateTeamSettings": true,
+      "MigrateTeamCapacities": false,
+      "Teams": ["Development Team"]
+    }
+  }
+  ```
+</Accordion>
+
+<Accordion title="Migrate capacities with user mapping">
+  When team member display names differ between source and target, combine capacity migration with the user mapping file:
+
+  ```json json
+  {
+    "TfsTeamSettingsTool": {
+      "Enabled": true,
+      "MigrateTeamSettings": true,
+      "UpdateTeamSettings": true,
+      "MigrateTeamCapacities": true,
+      "UseUserMapping": true,
+      "Teams": ["Scrum Team Alpha"]
+    }
+  }
+  ```
+
+  Requires `TfsUserMappingTool` to be enabled and configured with a valid `UserMappingFile`.
+</Accordion>
+
+</AccordionGroup>
+
+## Prerequisites
+
+The following must be in place before running this tool:
+
+1. **Area and iteration nodes exist in the target.** Run `TfsNodeStructureTool` first. If the team's configured area path or iteration path does not exist in the target, the settings migration will fail.
+2. **Teams exist in the target project.** Teams are not created by this tool. If the target project was just created, the default team exists but other teams must be created manually or via another process.
+
+<Warning>
+  `UpdateTeamSettings: true` overwrites the target team's existing settings. If you have manually configured teams in the target after a previous migration run, those manual changes will be lost on the next run.
+</Warning>
+
+## Practical notes
+
+- Run this tool as part of the same migration pipeline as `TfsNodeStructureTool` and your work item processor, in that order.
+- Use `Teams` to limit scope when you are doing an incremental migration and only certain teams need to be updated.
+- Team names in the `Teams` array must match the source project exactly, including case and spacing.
+- Sprint capacity data is tied to specific iteration paths. If the target iteration paths were remapped via `TfsNodeStructureTool`, capacities will be written to the remapped paths.

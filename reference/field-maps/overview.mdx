@@ -1,0 +1,112 @@
+---
+title: Field maps overview
+description: An overview of all available field map types in the Azure DevOps Migration Tools, how they work, and how to configure them.
+---
+
+Field maps control how field values are transformed when the `FieldMappingTool` processes each work item during migration. Each field map specifies a `FieldMapType`, an `ApplyTo` filter, and any type-specific parameters.
+
+## How field maps work
+
+Field maps are applied by the `FieldMappingTool`, which runs as part of the common tools pipeline. During work item processing, the tool iterates through each configured field map and applies it to every work item whose type matches the `ApplyTo` filter.
+
+Field maps are configured inside the `FieldMappingTool.FieldMaps` array:
+
+```json
+{
+  "MigrationTools": {
+    "CommonTools": {
+      "FieldMappingTool": {
+        "Enabled": true,
+        "FieldMaps": [
+          {
+            "FieldMapType": "FieldToFieldMap",
+            "ApplyTo": ["User Story"],
+            "sourceField": "Microsoft.VSTS.Scheduling.StoryPoints",
+            "targetField": "Microsoft.VSTS.Scheduling.Effort"
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+## The `ApplyTo` parameter
+
+Every field map requires an `ApplyTo` list. This list specifies which work item types the map applies to.
+
+- Use specific type names such as `["Bug", "Task"]` to limit the map to those types.
+- Use `["*"]` to apply the map to **all** work item types.
+
+```json
+"ApplyTo": ["*"]
+```
+
+## Available field map types
+
+<CardGroup cols={2}>
+  <Card title="FieldToFieldMap" icon="arrow-right">
+    Copies a value directly from one source field to one target field. Supports an optional `defaultValue` for null or empty source values.
+  </Card>
+  <Card title="FieldValueMap" icon="list">
+    Translates specific source field values to different target values using a lookup table (`valueMapping`). Ideal for state, priority, or category translations.
+  </Card>
+  <Card title="FieldToFieldMultiMap" icon="arrows-split-up-and-left">
+    Batch version of `FieldToFieldMap`. Defines multiple source-to-target field pairs in a single `SourceToTargetMappings` dictionary.
+  </Card>
+  <Card title="FieldLiteralMap" icon="pen">
+    Sets a static constant value on a target field for every matched work item. Useful for stamping all migrated items with a default state or tag.
+  </Card>
+  <Card title="FieldClearMap" icon="eraser">
+    Sets a target field to null. Includes validation to skip required, non-editable, or restricted-value fields automatically.
+  </Card>
+  <Card title="FieldSkipMap" icon="ban">
+    Restores a target field to its original value, effectively preventing any other field map from modifying it.
+  </Card>
+  <Card title="FieldMergeMap" icon="merge">
+    Combines values from multiple source fields into a single target field using a .NET format expression such as `"{0} {1}"`.
+  </Card>
+  <Card title="RegexFieldMap" icon="magnifying-glass">
+    Applies a .NET regular expression pattern and replacement to transform a source field value and write the result to a target field.
+  </Card>
+  <Card title="TreeToTagFieldMap" icon="sitemap">
+    Converts area path or iteration path hierarchy levels into work item tags. Supports skipping root levels and time-travel to historical path values.
+  </Card>
+  <Card title="FieldToTagFieldMap" icon="tag">
+    Converts the value of a source field into a work item tag, with optional format expression for prefix or label.
+  </Card>
+  <Card title="MultiValueConditionalMap" icon="code-branch">
+    Maps a set of target fields when all source field conditions match. Acts as an `if all source fields match these values, then set these target fields` rule.
+  </Card>
+  <Card title="FieldCalculationMap" icon="calculator">
+    Evaluates an NCalc mathematical expression using named source field parameters and writes the computed result to a target field.
+  </Card>
+</CardGroup>
+
+## Choosing the right map type
+
+| Scenario | Recommended map type |
+|---|---|
+| Copy one field to another | `FieldToFieldMap` |
+| Copy many fields at once | `FieldToFieldMultiMap` |
+| Translate state names between process templates | `FieldValueMap` |
+| Set the same value on all migrated items | `FieldLiteralMap` |
+| Remove a field value | `FieldClearMap` |
+| Prevent a field from being modified | `FieldSkipMap` |
+| Combine two fields into one | `FieldMergeMap` |
+| Extract or reformat text with patterns | `RegexFieldMap` |
+| Convert area/iteration paths to tags | `TreeToTagFieldMap` |
+| Tag a work item with a field's value | `FieldToTagFieldMap` |
+| Apply values when multiple conditions match | `MultiValueConditionalMap` |
+| Compute a value from numeric fields | `FieldCalculationMap` |
+
+## Reference pages
+
+<CardGroup cols={2}>
+  <Card title="Value maps" icon="arrow-right" href="/reference/field-maps/value-maps">
+    FieldToFieldMap, FieldValueMap, FieldToFieldMultiMap, FieldLiteralMap, FieldClearMap, FieldSkipMap, FieldMergeMap
+  </Card>
+  <Card title="Regex and tag maps" icon="magnifying-glass" href="/reference/field-maps/regex-maps">
+    RegexFieldMap, TreeToTagFieldMap, FieldToTagFieldMap, MultiValueConditionalMap, FieldCalculationMap
+  </Card>
+</CardGroup>

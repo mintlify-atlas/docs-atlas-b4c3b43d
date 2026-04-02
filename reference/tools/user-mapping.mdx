@@ -1,0 +1,224 @@
+---
+title: TfsUserMappingTool
+description: Map user identities between source and target systems so that work item assignments, history, and other identity fields reference the correct accounts after migration.
+---
+
+The `TfsUserMappingTool` resolves user identities when the source and target systems have different accounts. Without this tool, fields such as `System.AssignedTo` and `System.CreatedBy` may reference users that do not exist in the target, causing migration failures or orphaned identity values.
+
+The tool works in two phases:
+
+1. **Export**: Run the `TfsExportUsersForMappingProcessor` first to scan the source project and write a JSON file listing every unique user identity found across all configured identity fields.
+2. **Migration**: Enable `TfsUserMappingTool` during the main migration run. It reads the mapping file and rewrites identity field values before writing work items to the target.
+
+<Info>
+  Use `TfsExportUsersForMappingProcessor` to generate the initial `userExport.json` file. Open the file, fill in the target identity for each source identity, then reference it in `UserMappingFile`.
+</Info>
+
+## Configuration
+
+Place the `TfsUserMappingTool` block inside `MigrationTools.CommonTools`:
+
+```json configuration.json
+{
+  "MigrationTools": {
+    "Version": "16.0",
+    "CommonTools": {
+      "TfsUserMappingTool": {
+        "Enabled": true,
+        "UserMappingFile": "C:\\temp\\userExport.json",
+        "IdentityFieldsToCheck": [
+          "System.AssignedTo",
+          "System.ChangedBy",
+          "System.CreatedBy",
+          "Microsoft.VSTS.Common.ActivatedBy",
+          "Microsoft.VSTS.Common.ResolvedBy",
+          "Microsoft.VSTS.Common.ClosedBy"
+        ]
+      }
+    }
+  }
+}
+```
+
+## Options
+
+<ParamField body="Enabled" type="boolean" default="false">
+  Set to `true` to activate the tool. When `false`, identity fields are not rewritten during migration.
+</ParamField>
+
+<ParamField body="UserMappingFile" type="string">
+  Path to the JSON file that contains source-to-target identity mappings. Generate this file with `TfsExportUsersForMappingProcessor`, then edit it to fill in target identities before running the migration.
+
+  Example: `"C:\\temp\\userExport.json"`
+</ParamField>
+
+<ParamField body="IdentityFieldsToCheck" type="string[]">
+  List of field reference names that contain user identities. The tool inspects and rewrites each of these fields. Add any custom identity fields your process uses.
+
+  Default fields:
+  - `System.AssignedTo`
+  - `System.ChangedBy`
+  - `System.CreatedBy`
+  - `Microsoft.VSTS.Common.ActivatedBy`
+  - `Microsoft.VSTS.Common.ResolvedBy`
+  - `Microsoft.VSTS.Common.ClosedBy`
+</ParamField>
+
+<ParamField body="MatchUsersByEmail" type="boolean" default="false">
+  When `true`, the tool first attempts to match source users to target users by email address. If no email match is found, it falls back to matching by display name. When `false`, display name is the only matching criterion.
+</ParamField>
+
+<ParamField body="SkipValidateAllUsersExistOrAreMapped" type="boolean">
+  When `false` (the default), the tool validates before migration starts that every user found in the identity fields either exists in the target or has an explicit entry in `UserMappingFile`. Set to `true` to skip this pre-flight check — useful when some historical users no longer need to be represented in the target.
+</ParamField>
+
+<ParamField body="ProjectCollectionValidUsersGroupName" type="string" default='"Project Collection Valid Users"'>
+  The name of the group used to validate that target users are members of the project collection. Override this when the collection is configured with a non-English regional setting and the group name is localized.
+</ParamField>
+
+## User mapping file format
+
+The mapping file is a JSON array. Each entry maps one source identity to one target identity:
+
+```json userExport.json
+[
+  {
+    "Source": "domain\\sourceuser",
+    "Target": "targetdomain\\targetuser"
+  },
+  {
+    "Source": "olddomain\\john.doe",
+    "Target": "newdomain\\john.doe"
+  },
+  {
+    "Source": "contractor@external.com",
+    "Target": "employee@company.com"
+  }
+]
+```
+
+`TfsExportUsersForMappingProcessor` writes this file with the `Source` values populated and empty `Target` values. Edit the file to fill in the correct target identity for each entry before running your migration.
+
+## Common scenarios
+
+<AccordionGroup>
+
+<Accordion title="Automatic email matching">
+  When source and target accounts share the same email addresses, enable automatic matching to avoid maintaining a mapping file:
+
+  ```json json
+  {
+    "TfsUserMappingTool": {
+      "Enabled": true,
+      "MatchUsersByEmail": true,
+      "SkipValidateAllUsersExistOrAreMapped": false,
+      "IdentityFieldsToCheck": [
+        "System.AssignedTo",
+        "System.ChangedBy",
+        "System.CreatedBy",
+        "Microsoft.VSTS.Common.ActivatedBy",
+        "Microsoft.VSTS.Common.ResolvedBy",
+        "Microsoft.VSTS.Common.ClosedBy"
+      ]
+    }
+  }
+  ```
+</Accordion>
+
+<Accordion title="Manual mapping file">
+  When accounts differ between source and target (different domains, name changes, contractor-to-employee transitions):
+
+  ```json json
+  {
+    "TfsUserMappingTool": {
+      "Enabled": true,
+      "UserMappingFile": "C:\\temp\\userExport.json",
+      "MatchUsersByEmail": false,
+      "SkipValidateAllUsersExistOrAreMapped": false,
+      "IdentityFieldsToCheck": [
+        "System.AssignedTo",
+        "System.ChangedBy",
+        "System.CreatedBy",
+        "Microsoft.VSTS.Common.ActivatedBy",
+        "Microsoft.VSTS.Common.ResolvedBy",
+        "Microsoft.VSTS.Common.ClosedBy"
+      ]
+    }
+  }
+  ```
+</Accordion>
+
+<Accordion title="Custom identity fields">
+  When your process uses additional identity fields beyond the defaults:
+
+  ```json json
+  {
+    "TfsUserMappingTool": {
+      "Enabled": true,
+      "MatchUsersByEmail": true,
+      "IdentityFieldsToCheck": [
+        "System.AssignedTo",
+        "System.ChangedBy",
+        "System.CreatedBy",
+        "Microsoft.VSTS.Common.ActivatedBy",
+        "Microsoft.VSTS.Common.ResolvedBy",
+        "Microsoft.VSTS.Common.ClosedBy",
+        "Custom.TeamLead",
+        "Custom.ProjectManager"
+      ]
+    }
+  }
+  ```
+</Accordion>
+
+<Accordion title="Skip validation for historical users">
+  When the migration includes archived work items whose original assignees no longer exist in either system:
+
+  ```json json
+  {
+    "TfsUserMappingTool": {
+      "Enabled": true,
+      "MatchUsersByEmail": true,
+      "SkipValidateAllUsersExistOrAreMapped": true
+    }
+  }
+  ```
+
+  <Warning>
+    Skipping validation means unresolved users will be written as-is to the target. Test with a small batch first to confirm the outcome is acceptable.
+  </Warning>
+</Accordion>
+
+</AccordionGroup>
+
+## Recommended workflow
+
+<Steps>
+
+<Step title="Export users">
+  Add `TfsExportUsersForMappingProcessor` to your `Processors` array and run the tool with `Enabled: true`. This writes `userExport.json` (or the path you configured) listing all source identities.
+</Step>
+
+<Step title="Edit the mapping file">
+  Open the exported file and fill in the `Target` value for every source identity. Users with matching email addresses in both systems can be left as empty strings when `MatchUsersByEmail` is `true`.
+</Step>
+
+<Step title="Enable TfsUserMappingTool">
+  Set `Enabled: true` in `TfsUserMappingTool` and point `UserMappingFile` at the edited file.
+</Step>
+
+<Step title="Run a test migration">
+  Migrate a small representative set of work items and verify that identity fields are resolved correctly in the target.
+</Step>
+
+<Step title="Run the full migration">
+  Once the test passes, run the complete migration.
+</Step>
+
+</Steps>
+
+## Practical notes
+
+- Only list fields in `IdentityFieldsToCheck` that your work item types actually use. Processing unnecessary fields adds overhead.
+- Keep the mapping file in version control alongside your migration configuration so the mapping decisions are reproducible and auditable.
+- When `MatchUsersByEmail` is enabled, display-name matching still applies as a fallback. Entries in `UserMappingFile` take precedence over both email and display-name matching.

@@ -1,0 +1,91 @@
+---
+title: Introduction
+description: An overview of the Azure DevOps Migration Tools — what they do, what they support, and how to get started.
+---
+
+The Azure DevOps Migration Tools let you bulk edit and migrate data between Team Projects on Microsoft Team Foundation Server (TFS) and Azure DevOps Services. The tools are open source, published on [GitHub](https://github.com/nkdAgility/azure-devops-migration-tools), and available as a Winget package (`nkdAgility.AzureDevOpsMigrationTools`).
+
+<Info>
+  This tool is intended for experienced users familiar with TFS/Azure DevOps object models. Not all migration scenarios are supported. Community support is available on [GitHub Discussions](https://github.com/nkdAgility/azure-devops-migration-tools/discussions).
+</Info>
+
+## Compatibility
+
+The tools run on **Windows** and support connecting to:
+
+- Team Foundation Server 2013 and all later versions
+- Azure DevOps Server (all versions)
+- Azure DevOps Services (hosted)
+
+You can migrate from any supported source to any supported target — including across organizations, collections, and on-premises/cloud boundaries.
+
+## What you can do
+
+<CardGroup cols={2}>
+  <Card title="Move" icon="arrow-right">
+    Move Work Items, Test Plans & Suites, and Pipelines between projects, collections, and organizations.
+  </Card>
+  <Card title="Merge" icon="merge">
+    Merge multiple projects into a single project, even from different organizations.
+  </Card>
+  <Card title="Split" icon="scissors">
+    Split one project into several projects across collections and organizations.
+  </Card>
+  <Card title="Bulk edit" icon="pen">
+    Bulk edit Work Items in place — useful for cleaning up data or changing process templates.
+  </Card>
+</CardGroup>
+
+## What can be migrated
+
+| Data type | Details |
+|-----------|---------|
+| **Work Items** | Includes history, links, attachments, and custom field mappings. Optionally includes Teams and Shared Queries. |
+| **Test Plans & Suites** | Includes Configurations, Shared Steps, and Shared Parameters. |
+| **Pipelines** | Build pipelines (YAML and classic) and release pipelines between Azure DevOps organizations. Requires `AzureDevOpsEndpoint`. XAML pipelines are not supported. |
+| **Processes** | Process templates between locations. |
+
+<Note>
+  "Locations" refers to any combination of Projects, Collections, and Organizations.
+</Note>
+
+## Key features
+
+- **Resumable migrations** — the tool tracks migration state using a `ReflectedWorkItemId` field on each work item, so you can stop and restart without duplicating data.
+- **Work Item rules bypass** — the tool bypasses the TFS/Azure DevOps Work Item rules engine, allowing direct state transitions (e.g., setting `Closed` without going through `New`).
+- **Field and type mappings** — configure field-to-field mappings and work item type mappings to handle schema differences between source and target.
+- **WIQL-based scoping** — control exactly which work items are migrated using a WIQL query.
+- **Revision history** — optionally replay full revision history so that the audit trail is preserved in the target.
+
+## Installation options
+
+The tools can be installed in three ways:
+
+<CardGroup cols={3}>
+  <Card title="Winget" icon="windows" href="/setup/installation">
+    Recommended for Windows 10/11 workstations.
+  </Card>
+  <Card title="Chocolatey" icon="box" href="/setup/installation">
+    Recommended for Windows Server environments.
+  </Card>
+  <Card title="Manual ZIP" icon="file-archive" href="/setup/installation">
+    Download and extract the latest release from GitHub.
+  </Card>
+</CardGroup>
+
+## Get started
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/setup/installation">
+    Install the tools on your Windows machine.
+  </Card>
+  <Card title="Permissions" icon="lock" href="/setup/permissions">
+    Configure the required permissions for source and target.
+  </Card>
+  <Card title="ReflectedWorkItemId" icon="tag" href="/setup/reflected-workitem-id">
+    Add the migration tracking field to your target project.
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/get-started/quickstart">
+    Run your first migration step by step.
+  </Card>
+</CardGroup>

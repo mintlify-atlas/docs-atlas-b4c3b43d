@@ -1,0 +1,215 @@
+---
+title: "Processors"
+description: "Understand how processors work in Azure DevOps Migration Tools — what they are, how to configure them, and the full list of available processor types."
+---
+
+Processors are the core execution units of the migration tool. Each processor performs a specific migration task — moving work items, migrating test plans, exporting users, or cleaning up data. Processors are defined as an array under `MigrationTools.Processors` and run sequentially in the order they appear.
+
+## How processors work
+
+<Steps>
+  <Step title="Define the processor array">
+    Add one or more processor objects to the `Processors` array in your configuration. Each object requires at minimum `ProcessorType` and `Enabled`.
+  </Step>
+  <Step title="Set Enabled">
+    Only processors with `"Enabled": true` execute. Set `"Enabled": false` to skip a processor without removing it from the configuration.
+  </Step>
+  <Step title="Sequential execution">
+    Processors run in array order. If a processor fails (depending on its `MaxGracefulFailures` setting), subsequent processors may not run. Plan your processor order carefully — for example, run `TfsTestVariablesMigrationProcessor` before `TfsTestPlansAndSuitesMigrationProcessor`.
+  </Step>
+  <Step title="Shared tools">
+    Processors share the tools configured in `CommonTools`. For example, `FieldMappingTool` and `TfsNodeStructureTool` are configured once and applied by every processor that uses them.
+  </Step>
+</Steps>
+
+## Required fields on every processor
+
+<ParamField body="ProcessorType" type="string" required>
+  Identifies which processor to instantiate. Must exactly match one of the processor type names listed below (e.g. `"TfsWorkItemMigrationProcessor"`).
+</ParamField>
+
+<ParamField body="Enabled" type="boolean" required>
+  Set to `true` to run this processor. Set to `false` to skip it. Use this to build a configuration that can run different subsets of processors by toggling flags.
+</ParamField>
+
+## Example: single work item migration processor
+
+The following is the `TfsWorkItemMigrationProcessor` configuration from `configuration-default.json`:
+
+```json
+{
+  "Processors": [
+    {
+      "ProcessorType": "TfsWorkItemMigrationProcessor",
+      "Enabled": true,
+      "UpdateCreatedDate": true,
+      "UpdateCreatedBy": true,
+      "WIQLQuery": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject AND [System.WorkItemType] NOT IN ('Test Suite', 'Test Plan','Shared Steps','Shared Parameter','Feedback Request') ORDER BY [System.ChangedDate] desc",
+      "FixHtmlAttachmentLinks": false,
+      "WorkItemCreateRetryLimit": 5,
+      "FilterWorkItemsThatAlreadyExistInTarget": false,
+      "PauseAfterEachWorkItem": false,
+      "AttachRevisionHistory": false,
+      "GenerateMigrationComment": true,
+      "SourceName": "Source",
+      "TargetName": "Target",
+      "WorkItemIDs": [ 12 ],
+      "MaxGracefulFailures": 0,
+      "SkipRevisionWithInvalidIterationPath": false,
+      "SkipRevisionWithInvalidAreaPath": false
+    }
+  ]
+}
+```
+
+## Example: multiple processors
+
+You can chain processors together. The example below runs a work item migration followed by test plan migration. Processors run in array order.
+
+```json
+{
+  "Processors": [
+    {
+      "ProcessorType": "TfsWorkItemMigrationProcessor",
+      "Enabled": true,
+      "WIQLQuery": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject ORDER BY [System.ChangedDate] desc",
+      "SourceName": "Source",
+      "TargetName": "Target",
+      "UpdateCreatedDate": true,
+      "UpdateCreatedBy": true,
+      "FilterWorkItemsThatAlreadyExistInTarget": true,
+      "MaxGracefulFailures": 0
+    },
+    {
+      "ProcessorType": "TfsTestVariablesMigrationProcessor",
+      "Enabled": true,
+      "SourceName": "Source",
+      "TargetName": "Target"
+    },
+    {
+      "ProcessorType": "TfsTestConfigurationsMigrationProcessor",
+      "Enabled": true,
+      "SourceName": "Source",
+      "TargetName": "Target"
+    },
+    {
+      "ProcessorType": "TfsTestPlansAndSuitesMigrationProcessor",
+      "Enabled": true,
+      "SourceName": "Source",
+      "TargetName": "Target"
+    }
+  ]
+}
+```
+
+<Note>
+  `SourceName` and `TargetName` must match the keys in your `Endpoints` object — typically `"Source"` and `"Target"`.
+</Note>
+
+## Available processors
+
+<AccordionGroup>
+  <Accordion title="TfsWorkItemMigrationProcessor">
+    **The primary work item migration processor.** Migrates work items including their full revision history, attachments, and links from the source project to the target project. Configurable via WIQL query to control scope.
+
+    Key options: `WIQLQuery`, `UpdateCreatedDate`, `UpdateCreatedBy`, `FilterWorkItemsThatAlreadyExistInTarget`, `AttachRevisionHistory`, `GenerateMigrationComment`, `MaxGracefulFailures`, `SkipRevisionWithInvalidIterationPath`, `SkipRevisionWithInvalidAreaPath`.
+  </Accordion>
+
+  <Accordion title="TfsWorkItemBulkEditProcessor">
+    Applies changes to existing work items in the target system. Loads work items from the target and updates them in place. Used most commonly after a process template change to reapply field values or mappings without re-migrating items.
+
+    Key options: `WIQLQuery`, field map configuration via `CommonTools.FieldMappingTool`.
+  </Accordion>
+
+  <Accordion title="TfsWorkItemOverwriteProcessor">
+    Reapplies field mappings to already-migrated work items in the target. Does not move or create new work items — only updates field values on existing items. Useful for correcting field mappings after a migration.
+  </Accordion>
+
+  <Accordion title="TfsWorkItemDeleteProcessor">
+    Deletes work items in the target that match the provided WIQL query.
+
+    <Warning>
+      This action is not recoverable. Work items deleted by this processor cannot be restored. Use with extreme caution and always test with a limited `WorkItemIDs` list first.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="TfsWorkItemOverwriteAreasAsTagsProcessor">
+    Converts Area Path values to tags on work items in the target. Addresses the common problem of proliferating area paths that were used as team identifiers in older TFS instances.
+  </Accordion>
+
+  <Accordion title="TfsTeamSettingsProcessor">
+    Migrates team settings — including backlog levels, iteration paths, and area path assignments — from source to target. Requires the `TfsTeamSettingsTool` to be configured in `CommonTools`.
+  </Accordion>
+
+  <Accordion title="TfsSharedQueryProcessor">
+    Migrates shared work item queries from the source project to the target project, rewriting project references as needed.
+  </Accordion>
+
+  <Accordion title="TfsTestVariablesMigrationProcessor">
+    Migrates test variables defined in the source project. Must run before `TfsTestPlansAndSuitesMigrationProcessor` if test variables are referenced by test configurations.
+  </Accordion>
+
+  <Accordion title="TfsTestConfigurationsMigrationProcessor">
+    Migrates test configurations from the source project. Must run before `TfsTestPlansAndSuitesMigrationProcessor`.
+  </Accordion>
+
+  <Accordion title="TfsTestPlansAndSuitesMigrationProcessor">
+    Rebuilds test suites and test plans for test cases that have already been migrated using `TfsWorkItemMigrationProcessor`. Run this after work item migration is complete.
+  </Accordion>
+
+  <Accordion title="TfsExportUsersForMappingProcessor">
+    Exports a user list from the source system to a JSON file. The output file is used as input for `TfsUserMappingTool` to map source identities to target identities. Run this before the main work item migration.
+  </Accordion>
+
+  <Accordion title="TfsExportProfilePictureFromADProcessor">
+    Downloads user profile pictures from Active Directory. Used in conjunction with `TfsImportProfilePictureProcessor` to migrate corporate profile photos.
+  </Accordion>
+
+  <Accordion title="TfsImportProfilePictureProcessor">
+    Uploads previously exported profile pictures to Azure DevOps user profiles in the target organisation.
+  </Accordion>
+
+  <Accordion title="AzureDevOpsPipelineProcessor">
+    Migrates task groups, build pipelines, and release pipelines between Azure DevOps organisations. Requires `AzureDevOpsEndpoint` for both source and target. Does not use the TFS object model.
+  </Accordion>
+
+  <Accordion title="ProcessDefinitionProcessor">
+    Synchronises process definitions (work item types, fields, workflow states) between two organisations. Used to keep process templates in sync rather than for data migration.
+  </Accordion>
+
+  <Accordion title="TfsWorkItemTypeValidatorProcessor">
+    Validates work item types and fields between source and target before migration begins. Does not migrate any data — identifies compatibility issues that would cause migration failures.
+  </Accordion>
+
+  <Accordion title="WorkItemTrackingProcessor">
+    A generalised work item tracking processor designed to work with custom endpoint and enricher configurations. Use this when building non-standard migration pipelines.
+  </Accordion>
+
+  <Accordion title="OutboundLinkCheckingProcessor">
+    Scans work items for outbound links and reports on link validity. Useful for auditing link health before and after migration.
+  </Accordion>
+
+  <Accordion title="KeepOutboundLinkTargetProcessor">
+    Preserves outbound links that point to work items outside the migration scope. Prevents link deletion for cross-project or cross-organisation references.
+  </Accordion>
+</AccordionGroup>
+
+## Common processor options
+
+Many processors share a common set of options in addition to their own specific settings:
+
+<ParamField body="SourceName" type="string">
+  The key in `Endpoints` to use as the source. Defaults to `"Source"`.
+</ParamField>
+
+<ParamField body="TargetName" type="string">
+  The key in `Endpoints` to use as the target. Defaults to `"Target"`.
+</ParamField>
+
+<ParamField body="MaxGracefulFailures" type="number" default="0">
+  The number of individual item failures to tolerate before aborting the processor. Set to `0` to stop immediately on any failure. Set to a higher value to allow partial failures during large migrations.
+</ParamField>
+
+<ParamField body="PauseAfterEachWorkItem" type="boolean" default="false">
+  When `true`, the processor pauses and waits for a key press after processing each work item. Useful for debugging a small set of items.
+</ParamField>

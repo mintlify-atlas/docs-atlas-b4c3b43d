@@ -1,0 +1,243 @@
+---
+title: "Configuration overview"
+description: "Understand the structure of configuration.json for Azure DevOps Migration Tools — top-level sections, versioning, and how configuration controls migration behaviour."
+---
+
+The Azure DevOps Migration Tools are driven entirely by a single JSON configuration file. When you run the tool, it reads this file and executes each enabled processor in sequence, using the endpoints, tools, and field maps you have defined.
+
+<Note>
+  The configuration file is typically named `configuration.json`. You can generate a starter file by running `devopsmigration init` from the command line.
+</Note>
+
+## Top-level structure
+
+The configuration file has two root objects: `Serilog` (logging) and `MigrationTools` (everything else).
+
+```json configuration.json
+{
+  "Serilog": {
+    "MinimumLevel": "Debug"
+  },
+  "MigrationTools": {
+    "Version": "16.0",
+    "Endpoints": { },
+    "CommonTools": { },
+    "Processors": [ ]
+  }
+}
+```
+
+## Top-level keys
+
+<ParamField body="Serilog" type="object">
+  Controls logging output. Set `MinimumLevel` to `"Verbose"`, `"Debug"`, `"Information"`, `"Warning"`, or `"Error"`. Use `"Debug"` during initial setup and `"Information"` for production runs.
+</ParamField>
+
+<ParamField body="MigrationTools" type="object" required>
+  The main configuration container. All migration settings live inside this object.
+</ParamField>
+
+<ParamField body="MigrationTools.Version" type="string" required>
+  The configuration schema version. Must match the tool version you are running. Current value: `"16.0"`. The tool will warn or fail if this does not match.
+</ParamField>
+
+<ParamField body="MigrationTools.Endpoints" type="object" required>
+  Defines the `Source` and `Target` connection details. Each key (`Source`, `Target`) maps to an endpoint configuration block. See [Endpoints](/config/endpoints) for full details.
+</ParamField>
+
+<ParamField body="MigrationTools.CommonTools" type="object">
+  A named map of tool configurations that apply globally across all processors. Tools are keyed by tool name (e.g. `TfsNodeStructureTool`, `FieldMappingTool`). See [Tools](/config/tools) for full details.
+</ParamField>
+
+<ParamField body="MigrationTools.Processors" type="array" required>
+  An ordered list of processor configurations. Processors run in the order they appear in the array. Each processor must include `ProcessorType` and `Enabled`. See [Processors](/config/processors) for full details.
+</ParamField>
+
+## Complete default example
+
+The following is the full `configuration-default.json` shipped with the tool. It demonstrates a standard work item migration from one Azure DevOps project to another.
+
+```json configuration-default.json
+{
+  "Serilog": {
+    "MinimumLevel": "Debug"
+  },
+  "MigrationTools": {
+    "Version": "16.0",
+    "Endpoints": {
+      "Source": {
+        "EndpointType": "TfsTeamProjectEndpoint",
+        "AllowCrossProjectLinking": false,
+        "ReflectedWorkItemIdField": "Custom.ReflectedWorkItemId",
+        "Authentication": {
+          "AuthenticationMode": "AccessToken",
+          "AccessToken": "",
+          "NetworkCredentials": {
+            "UserName": "",
+            "Password": "",
+            "Domain": ""
+          }
+        },
+        "LanguageMaps": {
+          "AreaPath": "Area",
+          "IterationPath": "Iteration"
+        }
+      },
+      "Target": {
+        "EndpointType": "TfsTeamProjectEndpoint",
+        "Collection": "https://dev.azure.com/nkdagility-preview/",
+        "Project": "migrationTest55",
+        "TfsVersion": "AzureDevOps",
+        "Authentication": {
+          "AuthenticationMode": "AccessToken",
+          "AccessToken": "",
+          "NetworkCredentials": {
+            "UserName": "",
+            "Password": "",
+            "Domain": ""
+          }
+        },
+        "ReflectedWorkItemIdField": "nkdScrum.ReflectedWorkItemId",
+        "AllowCrossProjectLinking": false,
+        "LanguageMaps": {
+          "AreaPath": "Area",
+          "IterationPath": "Iteration"
+        }
+      }
+    },
+    "CommonTools": {
+      "WorkItemTypeMappingTool": {
+        "Enabled": true,
+        "Mappings": {
+          "User Story": "Product Backlog Item"
+        }
+      },
+      "StringManipulatorTool": {
+        "Enabled": true,
+        "MaxStringLength": 1000000,
+        "Manipulators": [
+          {
+            "$type": "RegexStringManipulator",
+            "Enabled": true,
+            "Pattern": "[^( -~)\n\r\t]+",
+            "Replacement": "",
+            "Description": "Remove invalid characters from the end of the string"
+          }
+        ]
+      },
+      "TfsAttachmentTool": {
+        "RefName": "TfsAttachmentTool",
+        "Enabled": true,
+        "ExportBasePath": "c:\\temp\\WorkItemAttachmentExport",
+        "MaxRevisions": 480000000
+      },
+      "FieldMappingTool": {
+        "Enabled": true,
+        "FieldMaps": [
+          {
+            "FieldMapType": "FieldtoFieldMap",
+            "ApplyTo": [ "SomeWorkItemType" ],
+            "sourceField": "System.AcceptanceCriteria",
+            "targetField": "System.AcceptanceCriteria2"
+          }
+        ]
+      },
+      "TfsGitRepositoryTool": {
+        "Enabled": true,
+        "Mappings": {
+          "Source Repo Name": "Target Repo Name"
+        }
+      },
+      "TfsNodeStructureTool": {
+        "Enabled": true,
+        "Areas": {
+          "Filters": [ " *\\Team 1,*\\Team 1\\**" ],
+          "Mappings": [
+            {
+              "Match": "^Skypoint Cloud([\\\\]?.*)$",
+              "Replacement": "MigrationTest5$1"
+            }
+          ]
+        },
+        "Iterations": {
+          "Filters": [],
+          "Mappings": [
+            {
+              "Match": "^Skypoint Cloud([\\\\]?.*)$",
+              "Replacement": "MigrationTest5$1"
+            }
+          ]
+        },
+        "ShouldCreateMissingRevisionPaths": true,
+        "ReplicateAllExistingNodes": true
+      },
+      "TfsRevisionManagerTool": {
+        "Enabled": true,
+        "ReplayRevisions": true,
+        "MaxRevisions": 0
+      },
+      "TfsTeamSettingsTool": {
+        "Enabled": true,
+        "MigrateTeamSettings": true,
+        "UpdateTeamSettings": true,
+        "MigrateTeamCapacities": true,
+        "Teams": [ "Team 1", "Team 2" ]
+      },
+      "TfsUserMappingTool": {
+        "Enabled": true,
+        "UserMappingFile": "C:\\temp\\userExport.json",
+        "IdentityFieldsToCheck": [
+          "System.AssignedTo",
+          "System.ChangedBy",
+          "System.CreatedBy",
+          "Microsoft.VSTS.Common.ActivatedBy",
+          "Microsoft.VSTS.Common.ResolvedBy",
+          "Microsoft.VSTS.Common.ClosedBy"
+        ]
+      }
+    },
+    "Processors": [
+      {
+        "ProcessorType": "TfsWorkItemMigrationProcessor",
+        "Enabled": true,
+        "UpdateCreatedDate": true,
+        "UpdateCreatedBy": true,
+        "WIQLQuery": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject AND [System.WorkItemType] NOT IN ('Test Suite', 'Test Plan','Shared Steps','Shared Parameter','Feedback Request') ORDER BY [System.ChangedDate] desc",
+        "FixHtmlAttachmentLinks": false,
+        "WorkItemCreateRetryLimit": 5,
+        "FilterWorkItemsThatAlreadyExistInTarget": false,
+        "PauseAfterEachWorkItem": false,
+        "AttachRevisionHistory": false,
+        "GenerateMigrationComment": true,
+        "SourceName": "Source",
+        "TargetName": "Target",
+        "WorkItemIDs": [ 12 ],
+        "MaxGracefulFailures": 0,
+        "SkipRevisionWithInvalidIterationPath": false,
+        "SkipRevisionWithInvalidAreaPath": false
+      }
+    ]
+  }
+}
+```
+
+## How the tool uses configuration
+
+<Steps>
+  <Step title="Load and validate">
+    The tool reads `configuration.json`, validates the `Version` field, and checks that required sections are present.
+  </Step>
+  <Step title="Connect endpoints">
+    Source and Target endpoint connections are established using the credentials in `Endpoints`. The tool verifies connectivity before proceeding.
+  </Step>
+  <Step title="Initialise tools">
+    All tools defined in `CommonTools` are initialised. Disabled tools are skipped. Tools are shared across all processors.
+  </Step>
+  <Step title="Run processors in order">
+    Each processor in the `Processors` array is evaluated. If `Enabled` is `true`, the processor runs. Processors execute sequentially — later processors can depend on the results of earlier ones.
+  </Step>
+</Steps>
+
+<Tip>
+  Start with `configuration-default.json` as a baseline and modify only the sections relevant to your migration. Most migrations require changes to `Endpoints` (collection URL, project name, access token) and `TfsNodeStructureTool` (area/iteration path mappings).
+</Tip>

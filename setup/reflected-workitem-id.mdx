@@ -1,0 +1,136 @@
+---
+title: ReflectedWorkItemId
+description: What the ReflectedWorkItemId field is, why the migration tools need it, and how to add it to your target project.
+---
+
+The Azure DevOps Migration Tools have no internal database or state file. Instead, they track which work items have already been migrated by writing the source work item's ID into a custom field on each migrated work item in the **target** project. This field is called `ReflectedWorkItemId`.
+
+This design enables:
+
+- **Resumable migrations** — if a migration stops partway through, the tool can query the target for already-migrated items and skip them.
+- **Incremental runs** — you can run the tool multiple times and only new or changed work items will be processed.
+- **Overlap-safe scoping** — multiple migration runs with overlapping WIQL queries will not duplicate work items.
+
+<Warning>
+  You only need to add the `ReflectedWorkItemId` field to the **target** project. Do not add it to the source. In older versions of the tool the source was also updated; that behaviour has been removed.
+</Warning>
+
+## How the field is referenced in configuration
+
+In your `configuration.json`, the `Target` endpoint has a `ReflectedWorkItemIdField` property. Set this to the **reference name** (not the display name) of the custom field you create:
+
+```json
+{
+  "MigrationTools": {
+    "Version": "16.0",
+    "Endpoints": {
+      "Target": {
+        "EndpointType": "TfsTeamProjectEndpoint",
+        "Collection": "https://dev.azure.com/your-org/",
+        "Project": "your-target-project",
+        "ReflectedWorkItemIdField": "Custom.ReflectedWorkItemId",
+        "Authentication": {
+          "AuthenticationMode": "AccessToken",
+          "AccessToken": "your-pat-here"
+        },
+        "LanguageMaps": {
+          "AreaPath": "Area",
+          "IterationPath": "Iteration"
+        }
+      }
+    }
+  }
+}
+```
+
+The reference name always contains at least one `.`. The value you use depends on your process type:
+
+| Process type | Typical reference name |
+|---|---|
+| Inherited process (Azure DevOps UI) | `Custom.ReflectedWorkItemId` |
+| Inherited process (custom template) | `YourTemplateName.ReflectedWorkItemId` |
+| XML process (TFS on-premises) | `TfsMigrationTool.ReflectedWorkItemId` |
+
+<Note>
+  When you create the field, check the field's **RefName** in the settings — this is the value to use in `configuration.json`, not the display name. Spaces in template names are replaced with underscores in the reference name.
+</Note>
+
+## Adding the field: Azure DevOps (inherited process)
+
+If your target project uses an **inherited process** (created through the Azure DevOps web UI), follow Microsoft's [Add a custom field to a work item type](https://learn.microsoft.com/en-us/azure/devops/organizations/settings/work/add-custom-field?view=azure-devops) documentation.
+
+<Steps>
+  <Step title="Open Organization Settings">
+    In Azure DevOps, go to **Organization Settings** > **Process**.
+  </Step>
+  <Step title="Open your process">
+    Find the inherited process used by your target project and click on it.
+  </Step>
+  <Step title="Select a work item type">
+    Select the work item type to add the field to (e.g., **User Story**, **Bug**). Repeat for each work item type in the project.
+  </Step>
+  <Step title="Add a new field">
+    Click **New field**. Set the **Name** to `ReflectedWorkItemId` and the **Type** to **Text (single line)**.
+  </Step>
+  <Step title="Note the reference name">
+    After saving, open the field details to find the **RefName**. For a standard custom field it will be `Custom.ReflectedWorkItemId`. Use this value in your `configuration.json`.
+  </Step>
+</Steps>
+
+<Tip>
+  The field must be added to **every work item type** in your target project that will receive migrated work items.
+</Tip>
+
+## Adding the field: Azure DevOps (XML process from TFS import)
+
+If your target project was migrated from on-premises TFS using the [data migration tool for Azure DevOps](https://learn.microsoft.com/en-us/azure/devops/migrate/migration-overview) and retained its XML process customizations, you cannot use the inherited process editor. Instead:
+
+<Steps>
+  <Step title="Export the process">
+    Go to **Organization Settings** > **Process**, find your project's process, and export it as a `.zip` file.
+  </Step>
+  <Step title="Edit the work item type definitions">
+    Extract the `.zip` file and edit each work item type XML file. Add the field to the `FIELDS` section:
+
+    ```xml
+    <FIELD name="ReflectedWorkItemId" refname="TfsMigrationTool.ReflectedWorkItemId" type="String" />
+    ```
+  </Step>
+  <Step title="Re-import the process">
+    Zip the folder structure back up and re-import it through **Organization Settings** > **Process**. The changes are applied to all projects using that process.
+  </Step>
+</Steps>
+
+## Adding the field: TFS on-premises (XML process)
+
+Use `witadmin` to export, edit, and re-import each work item type.
+
+<Steps>
+  <Step title="Export the work item type">
+    ```cmd
+    witadmin exportwitd /collection:http://myserver:8080/tfs/DefaultCollection /p:MyProject /n:"User Story" /f:userstory.xml
+    ```
+  </Step>
+  <Step title="Add the field definition">
+    Open `userstory.xml` and add the following inside the `<FIELDS>` element:
+
+    ```xml
+    <FIELD name="ReflectedWorkItemId" refname="TfsMigrationTool.ReflectedWorkItemId" type="String" />
+    ```
+  </Step>
+  <Step title="Import the updated definition">
+    ```cmd
+    witadmin importwitd /collection:http://myserver:8080/tfs/DefaultCollection /p:MyProject /f:userstory.xml
+    ```
+
+    Repeat for each work item type in your target project.
+  </Step>
+</Steps>
+
+For more detail on `witadmin` commands, see the [MSDN documentation](https://msdn.microsoft.com/en-us/library/dd236914.aspx).
+
+## Work item types you cannot customize
+
+Some work item types (such as Test Suite and Test Plan) cannot be customized in the standard way. For these, use the built-in field `Microsoft.VSTS.Build.IntegrationBuild` as the `ReflectedWorkItemIdField` value. This field is only used by builds and is safe to repurpose for migration tracking.
+
+This is most relevant when [migrating Test Plans and Suites](/how-to/migrate-test-plans).

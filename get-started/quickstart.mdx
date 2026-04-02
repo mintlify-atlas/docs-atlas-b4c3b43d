@@ -1,0 +1,188 @@
+---
+title: Quickstart
+description: Step-by-step guide to running your first work item migration with the Azure DevOps Migration Tools.
+---
+
+This guide walks you through migrating work items from one Azure DevOps project to another. By the end you will have a working `configuration.json` and will have executed your first migration.
+
+<Info>
+  This tool has been tested on migrations of 100 to 250,000 work items. Before you begin, watch [Basic Work Item Migration with the Azure DevOps Migration Tools](https://youtu.be/Qt1Ywu_KLrc?si=uEXjLS2pwe244ugV) for a practical overview of what to expect.
+</Info>
+
+## Prerequisites
+
+Before starting, make sure you have completed:
+
+1. [Installed the tools](/setup/installation) on your Windows machine.
+2. Confirmed you have the required [permissions](/setup/permissions) on both source and target.
+3. [Added the ReflectedWorkItemId field](/setup/reflected-workitem-id) to every work item type in the **target** project.
+
+## Step 1: Create a default configuration file
+
+<Steps>
+  <Step title="Open Windows Terminal">
+    Open [Windows Terminal](https://learn.microsoft.com/en-us/windows/terminal/) and navigate to the folder where you want to store your migration configuration. This will also be the working directory for the migration.
+  </Step>
+  <Step title="Generate a starter configuration">
+    Run the following command to create a `configuration.json` file with a basic work item migration setup:
+
+    ```bash
+    devopsmigration init --template Basic
+    ```
+
+    This writes a `configuration-Basic.json` file to the current directory. You can also use `--template WorkItemTracking` (the default) for a configuration with more tools pre-configured.
+
+    <Note>
+      The `--template` flag also accepts the aliases `--options`, `--outputMode`, and `-t`.
+    </Note>
+  </Step>
+  <Step title="Open the configuration file">
+    Open `configuration.json` in your editor of choice. You will customize it in the next steps.
+  </Step>
+</Steps>
+
+## Step 2: Configure source and target endpoints
+
+A minimal configuration for migrating work items between two Azure DevOps projects looks like this:
+
+```json
+{
+  "Serilog": {
+    "MinimumLevel": "Information"
+  },
+  "MigrationTools": {
+    "Version": "16.0",
+    "Endpoints": {
+      "Source": {
+        "EndpointType": "TfsTeamProjectEndpoint",
+        "Collection": "https://dev.azure.com/your-source-org/",
+        "Project": "your-source-project",
+        "Authentication": {
+          "AuthenticationMode": "AccessToken",
+          "AccessToken": "your-source-pat"
+        }
+      },
+      "Target": {
+        "EndpointType": "TfsTeamProjectEndpoint",
+        "Collection": "https://dev.azure.com/your-target-org/",
+        "Project": "your-target-project",
+        "Authentication": {
+          "AuthenticationMode": "AccessToken",
+          "AccessToken": "your-target-pat"
+        },
+        "ReflectedWorkItemIdField": "Custom.ReflectedWorkItemId"
+      }
+    },
+    "CommonTools": {},
+    "Processors": [
+      {
+        "ProcessorType": "TfsWorkItemMigrationProcessor",
+        "Enabled": true,
+        "WIQLQuery": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject AND [System.WorkItemType] NOT IN ('Test Suite', 'Test Plan','Shared Steps','Shared Parameter','Feedback Request') ORDER BY [System.ChangedDate] desc"
+      }
+    ]
+  }
+}
+```
+
+Make the following changes:
+
+<Steps>
+  <Step title="Set the Source Collection and Project">
+    Replace `https://dev.azure.com/your-source-org/` and `your-source-project` with the URL of your source Azure DevOps organization and the project name you are migrating from.
+  </Step>
+  <Step title="Set the Target Collection and Project">
+    Replace `https://dev.azure.com/your-target-org/` and `your-target-project` with the URL of your target organization and project.
+  </Step>
+  <Step title="Add Personal Access Tokens">
+    Replace `your-source-pat` and `your-target-pat` with valid PATs for each environment. Both PATs must have **full access** scope.
+
+    Alternatively, store your PAT in an environment variable. The tool reads configuration from environment variables using the pattern `MigrationTools__Endpoints__{EndpointName}__Authentication__AccessToken`. For example, to set the Source PAT:
+
+    ```bash
+    set MigrationTools__Endpoints__Source__Authentication__AccessToken=your-source-pat
+    ```
+
+    When the environment variable is set, you can leave `AccessToken` empty or omit it from the JSON file.
+  </Step>
+  <Step title="Set the ReflectedWorkItemIdField">
+    On the `Target` endpoint, set `ReflectedWorkItemIdField` to the reference name of the custom field you added. For an inherited process this is typically `Custom.ReflectedWorkItemId`.
+  </Step>
+  <Step title="Review the WIQL query">
+    The default `WIQLQuery` migrates all open work items except Test Suites, Test Plans, Shared Steps, Shared Parameters, and Feedback Requests. Modify it to scope your migration if needed — for example, to migrate only a specific area path.
+  </Step>
+  <Step title="Enable the processor">
+    Confirm that the `TfsWorkItemMigrationProcessor` has `"Enabled": true`. Any processor with `"Enabled": false` will be skipped.
+  </Step>
+</Steps>
+
+<Warning>
+  If your source and target projects use different work item type names (e.g., "User Story" in the source vs "Product Backlog Item" in the target), you must configure a `WorkItemTypeMappingTool` in `CommonTools` before running the migration. Otherwise the pre-migration validation will fail.
+</Warning>
+
+## Step 3: Run the migration
+
+Once your `configuration.json` is ready, execute the migration from the same working folder:
+
+```bash
+devopsmigration execute --config .\configuration.json
+```
+
+The tool will:
+
+1. **Validate** your configuration and the source/target environments, including checking that all required work item types and fields exist.
+2. **Query** the source project using your `WIQLQuery`.
+3. **Migrate** each work item in order, writing its history, attachments, and links to the target.
+4. **Track** each migrated work item by writing its source ID into the `ReflectedWorkItemIdField` on the target.
+
+<Note>
+  If validation fails before migration starts, the tool will print detailed error messages explaining what is missing. Common causes are missing work item types in the target, missing custom fields, or a missing `ReflectedWorkItemId` field. See the [troubleshooting guide](/troubleshooting/validation) for solutions.
+</Note>
+
+## Step 4: Verify the results
+
+After the migration completes:
+
+1. Open your target project in Azure DevOps.
+2. Check that work items appear with their history and attachments.
+3. Confirm that the `ReflectedWorkItemId` field is populated on migrated items — this is how you know the tool tracked them correctly.
+
+## Re-running and incremental migrations
+
+Because the tool uses `ReflectedWorkItemId` to track migrated items, you can run the migration multiple times safely. To skip work items already migrated in a previous run, set `FilterWorkItemsThatAlreadyExistInTarget` to `true` in the processor configuration:
+
+```json
+{
+  "ProcessorType": "TfsWorkItemMigrationProcessor",
+  "Enabled": true,
+  "FilterWorkItemsThatAlreadyExistInTarget": true,
+  "WIQLQuery": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject AND [System.WorkItemType] NOT IN ('Test Suite', 'Test Plan','Shared Steps','Shared Parameter','Feedback Request') ORDER BY [System.ChangedDate] desc"
+}
+```
+
+## Other init options
+
+When running `devopsmigration init` you can pass `--template` (or `-t`) with one of the following values to generate different starter configurations. The default template is `WorkItemTracking`.
+
+| Template | Description |
+|----------|-------------|
+| `Basic` | Minimal configuration with `TfsWorkItemMigrationProcessor`, `FieldMappingTool`, and `TfsTeamProjectEndpoint` for source and target. |
+| `WorkItemTracking` | Same as `Basic`. Default template. |
+| `PipelineProcessor` | Configuration with `AzureDevOpsPipelineProcessor` and `AzureDevOpsEndpoint` for pipeline migrations. |
+| `Reference` | All available processors and tools pre-configured with their defaults. Useful as a reference for discovering all options. |
+
+## Other CLI commands
+
+Beyond `init` and `execute`, the tool provides these additional commands:
+
+| Command | Description |
+|---------|-------------|
+| `devopsmigration version` | Displays the current version of the installed tool. |
+| `devopsmigration upgrade --config configuration.json` | Attempts to upgrade an older configuration file to the current schema. Writes the result to `configuration-upgraded.json`. This is best-effort — review all values after upgrading. |
+
+## Next steps
+
+- Review the [Configuration overview](/config/overview) to understand all available processors and tools.
+- Set up [field mappings](/config/field-maps) if your source and target have different field names.
+- Configure [user mappings](/how-to/user-mappings) to preserve `Assigned To` and `Created By` values.
+- Learn how to [migrate Test Plans and Suites](/how-to/migrate-test-plans).

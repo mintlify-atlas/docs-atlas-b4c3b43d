@@ -1,0 +1,167 @@
+---
+title: AzureDevOpsPipelineProcessor
+description: Configuration reference for AzureDevOpsPipelineProcessor, which migrates task groups, variable groups, service connections, and build and release pipelines between Azure DevOps organizations.
+---
+
+`AzureDevOpsPipelineProcessor` migrates CI/CD pipeline definitions from one Azure DevOps organization to another. It handles task groups, variable groups, service connections, build pipelines (YAML and classic), and classic release pipelines.
+
+<Warning>
+  **Beta processor.** This processor uses the Azure DevOps REST API and requires
+  `AzureDevOpsEndpoint` endpoints (not TFS Object Model endpoints).
+  **Service connection secrets are not migrated** — they must be entered manually in
+  the target organization after migration.
+</Warning>
+
+## What it does
+
+- Migrates classic and YAML build pipeline definitions
+- Migrates classic release pipeline definitions
+- Migrates task group definitions (reusable task templates)
+- Migrates variable group definitions (shared variable sets)
+- Migrates service connection definitions (secrets must be re-entered manually)
+- Supports filtering to migrate only named build or release pipelines
+- Supports repository name remapping when repository names differ between organizations
+
+## Prerequisites
+
+- Both source and target endpoints must be `AzureDevOpsEndpoint` type with a valid Personal Access Token that has permissions to read/write pipelines, task groups, variable groups, and service connections.
+- Repository connections referenced by pipelines must exist in the target organization. Use `RepositoryNameMaps` if repository names differ.
+- Agent pools referenced by pipelines must exist in the target organization with the same names, or pipelines must be updated manually after migration.
+
+## Configuration options
+
+<ParamField body="ProcessorType" type="string" required>
+  Must be set to `"AzureDevOpsPipelineProcessor"`.
+</ParamField>
+
+<ParamField body="Enabled" type="boolean" required>
+  Set to `true` to run this processor. Set to `false` to skip it without removing it
+  from the configuration.
+</ParamField>
+
+<ParamField body="SourceName" type="string" required>
+  The name of the source `AzureDevOpsEndpoint` to read pipeline definitions from.
+</ParamField>
+
+<ParamField body="TargetName" type="string" required>
+  The name of the target `AzureDevOpsEndpoint` to write pipeline definitions to.
+</ParamField>
+
+<ParamField body="MigrateBuildPipelines" type="boolean" default="true">
+  When `true`, build pipeline definitions are migrated from source to target. Set to
+  `false` to skip build pipelines while still migrating other pipeline types.
+</ParamField>
+
+<ParamField body="MigrateReleasePipelines" type="boolean" default="true">
+  When `true`, classic release pipeline definitions are migrated. Set to `false` to
+  skip release pipelines.
+</ParamField>
+
+<ParamField body="MigrateTaskGroups" type="boolean" default="true">
+  When `true`, task group definitions are migrated. Task groups are migrated before
+  pipelines so that pipeline definitions that reference them can resolve correctly.
+</ParamField>
+
+<ParamField body="MigrateVariableGroups" type="boolean" default="true">
+  When `true`, variable group definitions are migrated. Variable group values are
+  copied but secrets within variable groups are not — secret values must be set
+  manually in the target.
+</ParamField>
+
+<ParamField body="MigrateServiceConnections" type="boolean" default="true">
+  When `true`, service connection definitions are migrated. Only the connection
+  metadata (type, URL, name) is migrated. **Credentials and secrets are not migrated**
+  and must be configured manually in the target after migration.
+</ParamField>
+
+<ParamField body="BuildPipelines" type="string[]">
+  List of build pipeline names to migrate. When `null` or empty, all build pipelines
+  in the source project are migrated. Use this to restrict migration to specific
+  pipelines by name.
+</ParamField>
+
+<ParamField body="ReleasePipelines" type="string[]">
+  List of release pipeline names to migrate. When `null` or empty, all release
+  pipelines in the source project are migrated.
+</ParamField>
+
+<ParamField body="RepositoryNameMaps" type="object">
+  A dictionary mapping source repository names to target repository names. Use this
+  when repository names differ between the source and target organizations so that
+  pipeline definitions reference the correct repository in the target.
+
+  Example:
+  ```json
+  "RepositoryNameMaps": {
+    "OldRepoName": "NewRepoName",
+    "AnotherOldName": "AnotherNewName"
+  }
+  ```
+</ParamField>
+
+<ParamField body="Enrichers" type="object[]">
+  List of processor enricher configurations. Only native processors support enrichers.
+</ParamField>
+
+<ParamField body="RefName" type="string">
+  Reserved for future use. Will allow referencing a named options block.
+</ParamField>
+
+## Complete configuration example
+
+```json
+{
+  "MigrationTools": {
+    "Version": "16.0",
+    "Processors": [
+      {
+        "ProcessorType": "AzureDevOpsPipelineProcessor",
+        "Enabled": true,
+        "SourceName": "sourceName",
+        "TargetName": "targetName",
+        "MigrateBuildPipelines": true,
+        "MigrateReleasePipelines": true,
+        "MigrateTaskGroups": true,
+        "MigrateVariableGroups": true,
+        "MigrateServiceConnections": true,
+        "BuildPipelines": null,
+        "ReleasePipelines": null,
+        "RepositoryNameMaps": {}
+      }
+    ]
+  }
+}
+```
+
+### Migrate only specific build pipelines
+
+```json
+{
+  "ProcessorType": "AzureDevOpsPipelineProcessor",
+  "Enabled": true,
+  "SourceName": "sourceName",
+  "TargetName": "targetName",
+  "MigrateBuildPipelines": true,
+  "MigrateReleasePipelines": false,
+  "MigrateTaskGroups": true,
+  "MigrateVariableGroups": true,
+  "MigrateServiceConnections": false,
+  "BuildPipelines": ["CI-Main", "CI-PR-Validation"],
+  "ReleasePipelines": null,
+  "RepositoryNameMaps": {
+    "source-repo": "target-repo"
+  }
+}
+```
+
+## Post-migration steps
+
+<Note>
+  After running this processor, you must manually configure the following in the target
+  organization before pipelines will function correctly:
+
+  - **Service connection secrets** — re-enter credentials for each migrated service connection
+  - **Variable group secrets** — set secret variable values in each migrated variable group
+  - **Agent pools** — verify pipelines reference agent pools that exist in the target; update if names differ
+  - **Pipeline permissions** — review and configure resource permissions for pipelines in the target project settings
+</Note>

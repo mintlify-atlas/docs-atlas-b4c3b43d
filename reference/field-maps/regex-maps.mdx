@@ -1,0 +1,367 @@
+---
+title: Regex and tag maps
+description: Reference for RegexFieldMap, TreeToTagFieldMap, FieldToTagFieldMap, MultiValueConditionalMap, and FieldCalculationMap field map types.
+---
+
+These field map types use pattern matching, path hierarchies, conditional logic, or mathematical expressions to produce target field values.
+
+<AccordionGroup>
+
+  <Accordion title="RegexFieldMap">
+
+    Applies a .NET regular expression to a source field value and writes the transformed result to a target field. The map only proceeds if the pattern matches — non-matching values are left unchanged.
+
+    Use this for text cleanup, format standardization, content extraction, URL rewriting, or any scenario where the transformation follows a predictable pattern.
+
+    ### Parameters
+
+    <ParamField body="FieldMapType" type="string" required>
+      Must be `"RegexFieldMap"`.
+    </ParamField>
+
+    <ParamField body="ApplyTo" type="string[]" required>
+      List of work item type names this map applies to. Use `["*"]` to apply to all types.
+    </ParamField>
+
+    <ParamField body="sourceField" type="string">
+      Reference name of the field to read and apply the regex pattern to.
+    </ParamField>
+
+    <ParamField body="targetField" type="string">
+      Reference name of the field to write the transformed value to. Can be the same as `sourceField`.
+    </ParamField>
+
+    <ParamField body="pattern" type="string">
+      .NET regular expression pattern to match against the source value. Full .NET regex syntax is supported, including capturing groups, anchors, and lookaheads.
+    </ParamField>
+
+    <ParamField body="replacement" type="string">
+      Replacement string. Use `$1`, `$2`, etc. to reference captured groups. Use `$&` for the entire match.
+    </ParamField>
+
+    <ParamField body="Enabled" type="boolean">
+      Set to `false` to disable this map. Default is `true`.
+    </ParamField>
+
+    ### Example
+
+    ```json
+    {
+      "FieldMapType": "RegexFieldMap",
+      "ApplyTo": ["SomeWorkItemType"],
+      "sourceField": "COMPANY.PRODUCT.Release",
+      "targetField": "COMPANY.DEVISION.MinorReleaseVersion",
+      "pattern": "PRODUCT \\d{4}.(\\d{1})",
+      "replacement": "$1"
+    }
+    ```
+
+    ### Rewrite old server URLs in descriptions
+
+    ```json
+    {
+      "FieldMapType": "RegexFieldMap",
+      "ApplyTo": ["*"],
+      "sourceField": "System.Description",
+      "targetField": "System.Description",
+      "pattern": "https://oldwiki\\.company\\.com/([^\\s]+)",
+      "replacement": "https://newwiki.company.com/$1"
+    }
+    ```
+
+    ### Strip prefixes from titles
+
+    ```json
+    {
+      "FieldMapType": "RegexFieldMap",
+      "ApplyTo": ["Bug"],
+      "sourceField": "System.Title",
+      "targetField": "System.Title",
+      "pattern": "^(BUG|ISSUE):\\s*",
+      "replacement": ""
+    }
+    ```
+
+    <Note>
+      Values that do not match `pattern` are not modified. The map updates both the `WorkItemData` and `WorkItem` representations for consistency.
+    </Note>
+
+  </Accordion>
+
+  <Accordion title="TreeToTagFieldMap">
+
+    Converts area path or iteration path hierarchy levels into work item tags. You can skip root levels from the path and optionally retrieve the historical path value from a specific number of months ago.
+
+    Use this to preserve team or sprint structure as searchable tags when the organizational hierarchy changes between source and target.
+
+    ### Parameters
+
+    <ParamField body="FieldMapType" type="string" required>
+      Must be `"TreeToTagFieldMap"`.
+    </ParamField>
+
+    <ParamField body="ApplyTo" type="string[]" required>
+      List of work item type names this map applies to. Use `["*"]` to apply to all types.
+    </ParamField>
+
+    <ParamField body="toSkip" type="integer">
+      Number of hierarchy levels to skip from the root of the path. For example, with `toSkip: 2`, the path `ProjectName\Level1\Level2\Level3` produces tags starting from `Level2`. Use `0` to include all levels.
+    </ParamField>
+
+    <ParamField body="timeTravel" type="integer">
+      Number of months to travel back in time when reading the area path value. Use `0` to use the current value. Useful for capturing the historical organizational context of a work item.
+    </ParamField>
+
+    <ParamField body="Enabled" type="boolean">
+      Set to `false` to disable this map. Default is `true`.
+    </ParamField>
+
+    ### Example
+
+    ```json
+    {
+      "FieldMapType": "TreeToTagFieldMap",
+      "ApplyTo": ["*"],
+      "toSkip": 0,
+      "timeTravel": 0
+    }
+    ```
+
+    ### Skip project root and team level, use current paths
+
+    ```json
+    {
+      "FieldMapType": "TreeToTagFieldMap",
+      "ApplyTo": ["*"],
+      "toSkip": 2,
+      "timeTravel": 0
+    }
+    ```
+
+    ### Capture path from 6 months ago
+
+    ```json
+    {
+      "FieldMapType": "TreeToTagFieldMap",
+      "ApplyTo": ["*"],
+      "toSkip": 0,
+      "timeTravel": 6
+    }
+    ```
+
+    <Tip>
+      You can use two `TreeToTagFieldMap` entries together — one with `timeTravel: 0` for current paths and one with a non-zero `timeTravel` value for historical context.
+    </Tip>
+
+  </Accordion>
+
+  <Accordion title="FieldToTagFieldMap">
+
+    Reads a source field value and appends it as a work item tag. An optional `formatExpression` lets you prefix, label, or format the tag content. Null or empty source values produce no tag.
+
+    Use this to convert custom fields to tags when the target system does not have equivalent fields, or when you want to make field values searchable as tags.
+
+    ### Parameters
+
+    <ParamField body="FieldMapType" type="string" required>
+      Must be `"FieldToTagFieldMap"`.
+    </ParamField>
+
+    <ParamField body="ApplyTo" type="string[]" required>
+      List of work item type names this map applies to. Use `["*"]` to apply to all types.
+    </ParamField>
+
+    <ParamField body="sourceField" type="string">
+      Reference name of the field whose value will be converted to a tag.
+    </ParamField>
+
+    <ParamField body="formatExpression" type="string">
+      Optional .NET format string used to build the tag. Use `{0}` as a placeholder for the field value. For example, `"Priority-{0}"` with a source value of `"1"` produces the tag `"Priority-1"`.
+
+      When this field is used with multiple source fields (via `sourceFields`), it behaves like `FieldMergeMap` — writing merged content to the target field rather than creating a tag.
+    </ParamField>
+
+    <ParamField body="Enabled" type="boolean">
+      Set to `false` to disable this map. Default is `true`.
+    </ParamField>
+
+    ### Example — simple field to tag
+
+    ```json
+    {
+      "FieldMapType": "FieldToTagFieldMap",
+      "ApplyTo": ["SomeWorkItemType"],
+      "sourceField": "Microsoft.VSTS.Common.Priority",
+      "formatExpression": "Priority-{0}"
+    }
+    ```
+
+    ### Merge acceptance criteria into description (alternate use)
+
+    The YAML data file shows `FieldToTagFieldMap` can also accept `sourceFields` and a `targetField` to behave like a merge map:
+
+    ```json
+    {
+      "FieldMapType": "FieldToTagFieldMap",
+      "ApplyTo": ["SomeWorkItemType"],
+      "sourceFields": [
+        "System.Description",
+        "Microsoft.VSTS.Common.AcceptanceCriteria"
+      ],
+      "targetField": "System.Description",
+      "formatExpression": "{0} <br/><br/><h3>Acceptance Criteria</h3>{1}"
+    }
+    ```
+
+    <Info>
+      Tags are organization-wide in Azure DevOps. Consider tag naming conventions carefully to avoid collisions across projects.
+    </Info>
+
+  </Accordion>
+
+  <Accordion title="MultiValueConditionalMap">
+
+    Checks whether all fields specified in `sourceFieldsAndValues` match their configured values. If every condition is satisfied, the fields and values in `targetFieldsAndValues` are applied to the work item.
+
+    Use this when you need an "if all these source fields equal these values, then set these target fields" rule.
+
+    ### Parameters
+
+    <ParamField body="FieldMapType" type="string" required>
+      Must be `"MultiValueConditionalMap"`.
+    </ParamField>
+
+    <ParamField body="ApplyTo" type="string[]" required>
+      List of work item type names this map applies to. Use `["*"]` to apply to all types.
+    </ParamField>
+
+    <ParamField body="sourceFieldsAndValues" type="object">
+      Dictionary of source field reference names to required values. All entries must match for the target assignments to be applied.
+    </ParamField>
+
+    <ParamField body="targetFieldsAndValues" type="object">
+      Dictionary of target field reference names to values that will be set when all source conditions are met.
+    </ParamField>
+
+    <ParamField body="Enabled" type="boolean">
+      Set to `false` to disable this map. Default is `true`.
+    </ParamField>
+
+    ### Example
+
+    ```json
+    {
+      "FieldMapType": "MultiValueConditionalMap",
+      "ApplyTo": ["SomeWorkItemType"],
+      "sourceFieldsAndValues": {
+        "Field1": "Value1",
+        "Field2": "Value2"
+      },
+      "targetFieldsAndValues": {
+        "Field1": "Value1",
+        "Field2": "Value2"
+      }
+    }
+    ```
+
+    ### Real-world example — set classification when state and type match
+
+    ```json
+    {
+      "FieldMapType": "MultiValueConditionalMap",
+      "ApplyTo": ["Bug"],
+      "sourceFieldsAndValues": {
+        "System.State": "Resolved",
+        "Microsoft.VSTS.Common.Severity": "1 - Critical"
+      },
+      "targetFieldsAndValues": {
+        "Custom.WorkClassification": "Critical-Resolved"
+      }
+    }
+    ```
+
+    <Note>
+      All entries in `sourceFieldsAndValues` must match simultaneously (logical AND). To model OR logic, use multiple `MultiValueConditionalMap` entries.
+    </Note>
+
+  </Accordion>
+
+  <Accordion title="FieldCalculationMap">
+
+    Evaluates an NCalc mathematical expression and writes the result to a target field. Variables in the expression are defined in the `parameters` dictionary, which maps each variable name to a source field reference name. All source fields must contain numeric values.
+
+    Use this to compute derived fields such as cost estimates, weighted scores, or unit conversions during migration.
+
+    ### Parameters
+
+    <ParamField body="FieldMapType" type="string" required>
+      Must be `"FieldCalculationMap"`.
+    </ParamField>
+
+    <ParamField body="ApplyTo" type="string[]" required>
+      List of work item type names this map applies to. Use `["*"]` to apply to all types.
+    </ParamField>
+
+    <ParamField body="expression" type="string">
+      NCalc expression to evaluate. Reference variables using square brackets, e.g., `"[effort] * [rate]"`. Supports arithmetic, logical operations, and built-in math functions.
+    </ParamField>
+
+    <ParamField body="parameters" type="object" default="{}">
+      Dictionary mapping variable names used in the expression to source field reference names. For example, `{ "effort": "Custom.EstimatedHours" }` means `[effort]` in the expression reads from `Custom.EstimatedHours`.
+    </ParamField>
+
+    <ParamField body="targetField" type="string">
+      Reference name of the field where the calculated result will be stored.
+    </ParamField>
+
+    <ParamField body="Enabled" type="boolean">
+      Set to `false` to disable this map. Default is `true`.
+    </ParamField>
+
+    ### Example
+
+    ```json
+    {
+      "FieldMapType": "FieldCalculationMap",
+      "ApplyTo": ["Bug", "Task"],
+      "expression": "[effort] * [rate]",
+      "parameters": {
+        "effort": "Custom.EstimatedHours",
+        "rate": "Custom.HourlyRate"
+      },
+      "targetField": "Custom.EstimatedCost"
+    }
+    ```
+
+    ### Conditional weighting example
+
+    ```json
+    {
+      "FieldMapType": "FieldCalculationMap",
+      "ApplyTo": ["User Story"],
+      "expression": "if([priority] <= 2, [points] * 1.5, [points])",
+      "parameters": {
+        "priority": "Microsoft.VSTS.Common.Priority",
+        "points": "Microsoft.VSTS.Scheduling.StoryPoints"
+      },
+      "targetField": "Custom.WeightedPoints"
+    }
+    ```
+
+    ### Supported NCalc operations
+
+    | Category | Examples |
+    |---|---|
+    | Arithmetic | `+`, `-`, `*`, `/`, `%` |
+    | Comparison | `==`, `!=`, `<`, `>`, `<=`, `>=` |
+    | Logical | `&&`, `\|\|`, `!` |
+    | Math functions | `Abs(x)`, `Round(x, d)`, `Pow(x, y)`, `Min(a, b)`, `Max(a, b)`, `Sqrt(x)` |
+    | Conditional | `if(condition, trueValue, falseValue)` |
+
+    <Warning>
+      All source fields referenced in `parameters` must exist on the work item and contain numeric values. If any field is missing or non-numeric, the calculation is skipped and an error is logged.
+    </Warning>
+
+  </Accordion>
+
+</AccordionGroup>

@@ -1,0 +1,287 @@
+---
+title: Migrate test plans and suites
+description: A multi-step guide for migrating Test Plans, Test Suites, Test Cases, Shared Steps, and Shared Parameters between Azure DevOps projects.
+---
+
+Migrating test plans and suites requires a multi-step approach because different test work item types have different constraints. Specifically, `Shared Steps` and `Shared Parameters` cannot have custom fields added to them, which means you cannot use the standard `ReflectedWorkItemId` tracking field to link them back to their source items.
+
+To work around this, the migration process uses `Microsoft.VSTS.Build.IntegrationBuild` — a built-in field available on all test work item types — as a temporary tracking mechanism during the test item migration phase.
+
+<Warning>
+Test run results are **not migrated**. Only the structure (plans, suites, test cases, steps, parameters, variables, and configurations) is carried over.
+</Warning>
+
+## Overview of steps
+
+1. Migrate all basic work items, excluding test types
+2. Migrate Test Cases, Shared Steps, and Shared Parameters
+3. Migrate Test Variables and Test Configurations
+4. Rebuild Test Plans and Test Suites
+
+Each step uses a separate configuration file and must be run in order.
+
+---
+
+## Step 1: Migrate basic work items
+
+This step migrates everything except test-specific work item types. It also populates `Microsoft.VSTS.Build.IntegrationBuild` with the `ReflectedWorkItemId` value via a field map — this is needed so the test item migration in step 2 can find the corresponding target items.
+
+**Key points:**
+- `ReflectedWorkItemIdField` on Target points to your main custom field (e.g., `Custom.ReflectedWorkItemId`)
+- A field map copies `Custom.ReflectedWorkItemId` to `Microsoft.VSTS.Build.IntegrationBuild`
+- The WIQL query excludes all test work item types
+
+```json
+{
+  "Serilog": {
+    "MinimumLevel": "Information"
+  },
+  "MigrationTools": {
+    "Version": "16.0",
+    "Endpoints": {
+      "Source": {
+        "EndpointType": "TfsTeamProjectEndpoint",
+        "Collection": "https://dev.azure.com/your-org/",
+        "Project": "migrationSource1",
+        "Authentication": {
+          "AuthenticationMode": "AccessToken",
+          "AccessToken": "YOUR_SOURCE_PAT"
+        }
+      },
+      "Target": {
+        "EndpointType": "TfsTeamProjectEndpoint",
+        "Collection": "https://dev.azure.com/your-org/",
+        "Project": "migrationTest5",
+        "Authentication": {
+          "AuthenticationMode": "AccessToken",
+          "AccessToken": "YOUR_TARGET_PAT"
+        },
+        "ReflectedWorkItemIdField": "Custom.ReflectedWorkItemId"
+      }
+    },
+    "CommonTools": {
+      "FieldMappingTool": {
+        "Enabled": true,
+        "FieldMaps": [
+          {
+            "FieldMapType": "FieldToFieldMap",
+            "fieldMapMode": "TargetToTarget",
+            "sourceField": "Custom.ReflectedWorkItemId",
+            "targetField": "Microsoft.VSTS.Build.IntegrationBuild",
+            "defaultValue": "",
+            "ApplyTo": ["*"]
+          }
+        ]
+      }
+    },
+    "Processors": [
+      {
+        "ProcessorType": "TfsWorkItemMigrationProcessor",
+        "Enabled": true,
+        "UpdateCreatedDate": true,
+        "UpdateCreatedBy": true,
+        "WIQLQuery": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject AND [System.WorkItemType] NOT IN ('Test Case', 'Test Suite', 'Test Plan','Shared Steps','Shared Parameter','Feedback Request') ORDER BY [System.ChangedDate] desc"
+      }
+    ]
+  }
+}
+```
+
+Run this configuration:
+
+```bash
+devopsmigration execute --config .\step1-basic-work-items.json
+```
+
+---
+
+## Step 2: Migrate Test Cases, Shared Steps, and Shared Parameters
+
+This step migrates test work items that can be treated as regular work items. It uses `Microsoft.VSTS.Build.IntegrationBuild` as the `ReflectedWorkItemIdField` on the Target because `Shared Steps` and `Shared Parameters` do not support custom fields.
+
+A field map then copies `Microsoft.VSTS.Build.IntegrationBuild` back to `Custom.ReflectedWorkItemId` on Test Cases specifically, so they can be tracked alongside the other migrated work items.
+
+**Key points:**
+- `ReflectedWorkItemIdField` on Target is set to `Microsoft.VSTS.Build.IntegrationBuild`
+- Field map copies `Microsoft.VSTS.Build.IntegrationBuild` to `Custom.ReflectedWorkItemId` for Test Cases only
+- The WIQL query includes only `Test Case`, `Shared Steps`, and `Shared Parameter` — **not** `Test Suite` or `Test Plan`
+
+```json
+{
+  "Serilog": {
+    "MinimumLevel": "Information"
+  },
+  "MigrationTools": {
+    "Version": "16.0",
+    "Endpoints": {
+      "Source": {
+        "EndpointType": "TfsTeamProjectEndpoint",
+        "Collection": "https://dev.azure.com/your-org/",
+        "Project": "migrationSource1",
+        "Authentication": {
+          "AuthenticationMode": "AccessToken",
+          "AccessToken": "YOUR_SOURCE_PAT"
+        }
+      },
+      "Target": {
+        "EndpointType": "TfsTeamProjectEndpoint",
+        "Collection": "https://dev.azure.com/your-org/",
+        "Project": "migrationTest5",
+        "Authentication": {
+          "AuthenticationMode": "AccessToken",
+          "AccessToken": "YOUR_TARGET_PAT"
+        },
+        "ReflectedWorkItemIdField": "Microsoft.VSTS.Build.IntegrationBuild"
+      }
+    },
+    "Processors": [
+      {
+        "ProcessorType": "TfsWorkItemMigrationProcessor",
+        "Enabled": true,
+        "WIQLQuery": "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @TeamProject AND [System.WorkItemType] IN ('Test Case','Shared Steps','Shared Parameter') ORDER BY [System.ChangedDate] desc"
+      }
+    ]
+  }
+}
+```
+
+Run this configuration:
+
+```bash
+devopsmigration execute --config .\step2-test-cases.json
+```
+
+---
+
+## Step 3: Migrate Test Variables and Test Configurations
+
+Test Variables and Test Configurations are prerequisites for rebuilding plans and suites in step 4. They must exist in the target before `TfsTestPlansAndSuitesMigrationProcessor` runs.
+
+```json
+{
+  "Serilog": {
+    "MinimumLevel": "Information"
+  },
+  "MigrationTools": {
+    "Version": "16.0",
+    "Endpoints": {
+      "Source": {
+        "EndpointType": "TfsTeamProjectEndpoint",
+        "Collection": "https://dev.azure.com/your-org/",
+        "Project": "migrationSource1",
+        "Authentication": {
+          "AuthenticationMode": "AccessToken",
+          "AccessToken": "YOUR_SOURCE_PAT"
+        }
+      },
+      "Target": {
+        "EndpointType": "TfsTeamProjectEndpoint",
+        "Collection": "https://dev.azure.com/your-org/",
+        "Project": "migrationTest5",
+        "Authentication": {
+          "AuthenticationMode": "AccessToken",
+          "AccessToken": "YOUR_TARGET_PAT"
+        },
+        "ReflectedWorkItemIdField": "Custom.ReflectedWorkItemId"
+      }
+    },
+    "Processors": [
+      {
+        "ProcessorType": "TfsTestVariablesMigrationProcessor",
+        "Enabled": true,
+        "Processor": "TestVariablesMigrationContext"
+      },
+      {
+        "ProcessorType": "TfsTestConfigurationsMigrationProcessor",
+        "Enabled": true
+      }
+    ]
+  }
+}
+```
+
+Run this configuration:
+
+```bash
+devopsmigration execute --config .\step3-test-variables-configs.json
+```
+
+---
+
+## Step 4: Rebuild Test Plans and Test Suites
+
+This final step reconstructs the plan and suite hierarchy in the target project and wires up all the Test Cases migrated in step 2.
+
+<Note>
+Test run results are not migrated. Only the plan and suite structure with their associated test cases is rebuilt.
+</Note>
+
+**Key points:**
+- Uses `TfsTestPlansAndSuitesMigrationProcessor`
+- All test cases, shared steps, and shared parameters must already exist in the target (step 2)
+- All test variables and configurations must already exist in the target (step 3)
+
+```json
+{
+  "Serilog": {
+    "MinimumLevel": "Information"
+  },
+  "MigrationTools": {
+    "Version": "16.0",
+    "Endpoints": {
+      "Source": {
+        "EndpointType": "TfsTeamProjectEndpoint",
+        "Collection": "https://dev.azure.com/your-org/",
+        "Project": "migrationSource1",
+        "Authentication": {
+          "AuthenticationMode": "AccessToken",
+          "AccessToken": "YOUR_SOURCE_PAT"
+        }
+      },
+      "Target": {
+        "EndpointType": "TfsTeamProjectEndpoint",
+        "Collection": "https://dev.azure.com/your-org/",
+        "Project": "migrationTest5",
+        "Authentication": {
+          "AuthenticationMode": "AccessToken",
+          "AccessToken": "YOUR_TARGET_PAT"
+        },
+        "ReflectedWorkItemIdField": "Custom.ReflectedWorkItemId"
+      }
+    },
+    "Processors": [
+      {
+        "ProcessorType": "TfsTestPlansAndSuitesMigrationProcessor",
+        "Enabled": true,
+        "OnlyElementsWithTag": "",
+        "TestPlanQuery": null,
+        "RemoveAllLinks": false,
+        "MigrationDelay": 0,
+        "RemoveInvalidTestSuiteLinks": false,
+        "FilterCompleted": false
+      }
+    ]
+  }
+}
+```
+
+Run this configuration:
+
+```bash
+devopsmigration execute --config .\step4-test-plans-suites.json
+```
+
+---
+
+## Why this multi-step approach is required
+
+The root constraint is that `Shared Steps` and `Shared Parameters` are work item types that Azure DevOps does not allow you to add custom fields to. The standard migration flow uses a custom field (`Custom.ReflectedWorkItemId`) to track which source item corresponds to which target item. Since you cannot add this field to Shared Steps or Shared Parameters, the tool instead uses the built-in `Microsoft.VSTS.Build.IntegrationBuild` field as a temporary surrogate during the test item phase.
+
+The sequence therefore is:
+
+1. Migrate regular work items using the custom tracking field, and simultaneously copy the tracking field value into `IntegrationBuild` for later use
+2. Migrate test work items using `IntegrationBuild` as the tracking field, which works on all test types including Shared Steps
+3. Migrate variables and configurations (no tracking field dependency)
+4. Rebuild plans and suites, which look up test cases by the tracking field
+
+Each step depends on the previous one completing successfully.
